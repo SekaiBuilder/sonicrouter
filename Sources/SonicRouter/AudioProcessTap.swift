@@ -84,7 +84,9 @@ enum SonicRouterAudioCleanup {
             return []
         }
 
-        var ids = [AudioObjectID](repeating: 0, count: Int(dataSize) / MemoryLayout<AudioObjectID>.size)
+        let count = Int(dataSize) / MemoryLayout<AudioObjectID>.size
+        guard count > 0 else { return [] }
+        var ids = [AudioObjectID](repeating: 0, count: count)
         let status = ids.withUnsafeMutableBufferPointer { buffer in
             AudioObjectGetPropertyData(objectID, &propertyAddress, 0, nil, &dataSize, buffer.baseAddress!)
         }
@@ -109,7 +111,7 @@ enum SonicRouterAudioCleanup {
             AudioObjectGetPropertyData(objectID, &propertyAddress, 0, nil, &dataSize, pointer)
         }
         guard status == noErr, let value else { return "" }
-        return value.takeUnretainedValue() as String
+        return value.takeRetainedValue() as String
     }
 
     private static func tapDescription(_ tapID: AudioObjectID) -> CATapDescription? {
@@ -336,7 +338,7 @@ private enum TapAggregate {
             AudioObjectGetPropertyData(tapID, &propertyAddress, 0, nil, &dataSize, pointer)
         }
         guard status == noErr, let value else { return fallback.uuidString }
-        return value.takeUnretainedValue() as String
+        return value.takeRetainedValue() as String
     }
 
     static func composition(name: String, uid: String, outputUID: String, tapUID: String) -> CFDictionary {

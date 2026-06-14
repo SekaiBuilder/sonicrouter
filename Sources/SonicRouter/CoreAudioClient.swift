@@ -92,6 +92,7 @@ private extension CoreAudioClient {
         guard sizeStatus == noErr, dataSize > 0 else { return [] }
 
         let count = Int(dataSize) / MemoryLayout<AudioObjectID>.size
+        guard count > 0 else { return [] }
         var ids = [AudioObjectID](repeating: 0, count: count)
         let dataStatus = ids.withUnsafeMutableBufferPointer { buffer in
             AudioObjectGetPropertyData(objectID, &propertyAddress, 0, nil, &dataSize, buffer.baseAddress!)
@@ -157,7 +158,10 @@ private extension CoreAudioClient {
             AudioObjectGetPropertyData(objectID, &propertyAddress, 0, nil, &dataSize, pointer)
         }
         guard status == noErr, let value else { return "Audio Device \(objectID)" }
-        return value.takeUnretainedValue() as String
+        // CoreAudio returns CFString properties under the Create Rule: the caller
+        // owns the +1 reference and must release it. Retaining here (vs. an
+        // unretained read) avoids leaking one CFString per device on every refresh.
+        return value.takeRetainedValue() as String
     }
 
     static func volume(for deviceID: AudioObjectID, scope: AudioObjectPropertyScope) -> Double? {

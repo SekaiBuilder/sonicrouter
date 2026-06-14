@@ -30,7 +30,7 @@ enum CoreAudioProcessClient {
     }
 
     static func deviceNames(for ids: [AudioObjectID]) -> [String] {
-        ids.map { stringProperty(kAudioObjectPropertyName, objectID: $0, retained: false) }
+        ids.map { stringProperty(kAudioObjectPropertyName, objectID: $0) }
             .filter { !$0.isEmpty }
     }
 }
@@ -42,7 +42,7 @@ private extension CoreAudioProcessClient {
         return CoreAudioProcessInfo(
             objectID: objectID,
             processIdentifier: pid,
-            bundleIdentifier: stringProperty(kAudioProcessPropertyBundleID, objectID: objectID, retained: true),
+            bundleIdentifier: stringProperty(kAudioProcessPropertyBundleID, objectID: objectID),
             isRunningInput: boolProperty(kAudioProcessPropertyIsRunningInput, objectID: objectID),
             isRunningOutput: boolProperty(kAudioProcessPropertyIsRunningOutput, objectID: objectID),
             outputDeviceIDs: objectIDs(
@@ -72,6 +72,7 @@ private extension CoreAudioProcessClient {
         guard sizeStatus == noErr, dataSize > 0 else { return [] }
 
         let count = Int(dataSize) / MemoryLayout<AudioObjectID>.size
+        guard count > 0 else { return [] }
         var ids = [AudioObjectID](repeating: 0, count: count)
         let dataStatus = ids.withUnsafeMutableBufferPointer { buffer in
             AudioObjectGetPropertyData(objectID, &propertyAddress, 0, nil, &dataSize, buffer.baseAddress!)
@@ -100,10 +101,13 @@ private extension CoreAudioProcessClient {
         return status == noErr && value != 0
     }
 
+    /// CoreAudio CFString properties (name, bundle ID, …) follow the Create Rule:
+    /// the returned reference is owned by the caller and must be released, so we
+    /// always take it retained. Reading it unretained would leak one CFString per
+    /// call, which adds up across the periodic process/device scans.
     static func stringProperty(
         _ selector: AudioObjectPropertySelector,
-        objectID: AudioObjectID,
-        retained: Bool
+        objectID: AudioObjectID
     ) -> String {
         var propertyAddress = address(selector: selector)
         guard AudioObjectHasProperty(objectID, &propertyAddress) else { return "" }
@@ -114,6 +118,6 @@ private extension CoreAudioProcessClient {
             AudioObjectGetPropertyData(objectID, &propertyAddress, 0, nil, &dataSize, pointer)
         }
         guard status == noErr, let value else { return "" }
-        return (retained ? value.takeRetainedValue() : value.takeUnretainedValue()) as String
+        return value.takeRetainedValue() as String
     }
 }

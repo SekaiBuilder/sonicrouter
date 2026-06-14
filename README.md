@@ -47,3 +47,13 @@ Para desarrollo de UI sin audio real, `swift run` sigue funcionando (pero el mut
 
 - macOS 15 o superior.
 - Swift toolchain instalada.
+
+## Privacidad
+
+SonicRouter procesa el audio **solo en memoria y solo en tu Mac**: no graba, no guarda y
+no transmite nada. Lo único que se persiste son tus preferencias (volúmenes y rutas por
+app). Los detalles del modelo de seguridad están en [SECURITY.md](SECURITY.md).
+
+## Licencia
+
+[MIT](LICENSE) © 2026 Francesco Catania.
