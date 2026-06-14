@@ -4,6 +4,18 @@ App local para macOS para ver qué apps están reproduciendo audio y **silenciar
 
 Caso de uso típico: estás en una llamada de FaceTime y quieres ver un video → silencias la llamada con un clic y sigues escuchando el video.
 
+### Mezclador por app (ventana completa)
+
+Sube, baja o silencia cada app de forma independiente:
+
+![Mezclador por app de SonicRouter ajustando volumen y silenciando una app](docs/demo-mixer.gif)
+
+### Control rápido desde la barra de menús
+
+Al cerrar la ventana, la app sigue viva en la barra de menús (arriba a la derecha) y puedes seguir controlando el audio sin abrirla:
+
+![Panel de la barra de menús de SonicRouter silenciando apps](docs/demo-menubar.gif)
+
 ## Qué hace
 
 - **Mute real por app** usando *Process Taps* de Core Audio (`AudioHardwareCreateProcessTap`). El audio de la app se silencia a nivel de sistema sin cerrar ni pausar la app.
