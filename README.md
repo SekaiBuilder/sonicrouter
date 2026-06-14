@@ -43,6 +43,10 @@ Ambos arrancan solo cuando controlas una app. Una vez que el motor de volumen es
 
 ## Ejecutar
 
+### Descarga directa (sin compilar)
+
+Descarga la app ya compilada desde la [última release](https://github.com/SekaiBuilder/sonicrouter/releases/latest): coge `SonicRouter-1.2-macOS.zip`, descomprímelo y arrastra `SonicRouter.app` a Aplicaciones. La primera vez ábrela con **clic derecho → Abrir** (no está firmada con cuenta de desarrollador).
+
 ### Instalación en un comando
 
 Instala la toolchain de Swift (Command Line Tools, si aún no la tienes), descarga SonicRouter, lo compila y lo abre:
