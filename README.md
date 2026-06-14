@@ -43,6 +43,18 @@ Ambos arrancan solo cuando controlas una app. Una vez que el motor de volumen es
 
 ## Ejecutar
 
+### Instalación en un comando
+
+Instala la toolchain de Swift (Command Line Tools, si aún no la tienes), descarga SonicRouter, lo compila y lo abre:
+
+```bash
+xcode-select -p >/dev/null 2>&1 || xcode-select --install; git clone https://github.com/SekaiBuilder/sonicrouter.git && cd sonicrouter && chmod +x Scripts/build-app.sh && Scripts/build-app.sh && open build/SonicRouter.app
+```
+
+> Si era la primera vez que se instalaban los Command Line Tools, espera a que termine la instalación y vuelve a ejecutar el comando.
+
+### Paso a paso
+
 Para que el mute funcione hay que correr la `.app` (por el permiso de captura):
 
 ```bash
