@@ -59,8 +59,6 @@ struct SonicRouterApp: App {
                 .tint(Theme.accent)
                 .frame(minWidth: 720, minHeight: 520)
                 .task {
-                    audioStore.refresh()
-                    appStore.refresh()
                     appStore.checkPermission()
                 }
         }

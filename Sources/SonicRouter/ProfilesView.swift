@@ -3,19 +3,28 @@ import SwiftUI
 struct ProfilesView: View {
     @EnvironmentObject private var audioStore: AudioDeviceStore
     @EnvironmentObject private var appStore: ApplicationAudioStore
+    @ObservedObject private var l10n = L10n.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HeaderView(
-                title: "Volumen guardado",
-                subtitle: "El nivel que eliges para cada app se recuerda y se vuelve a aplicar automáticamente cuando esa app empieza a sonar."
+                title: l10n.t("Volumen guardado", "Saved volume", "保存済みの音量"),
+                subtitle: l10n.t(
+                    "El nivel que eliges para cada app se recuerda y se vuelve a aplicar automáticamente cuando esa app empieza a sonar.",
+                    "The level you choose for each app is remembered and re-applied automatically when that app starts playing.",
+                    "アプリごとに選んだ音量は記憶され、そのアプリが再生を始めると自動的に再適用されます。"
+                )
             )
 
             if appStore.profiles.isEmpty {
                 EmptyHint(
                     symbol: "bookmark",
-                    title: "Aún no hay niveles guardados",
-                    subtitle: "Ajusta el volumen de una app en el mezclador y se guardará aquí."
+                    title: l10n.t("Aún no hay niveles guardados", "No saved levels yet", "保存された音量はまだありません"),
+                    subtitle: l10n.t(
+                        "Ajusta el volumen de una app en el mezclador y se guardará aquí.",
+                        "Adjust an app's volume in the mixer and it will be saved here.",
+                        "ミキサーでアプリの音量を調整するとここに保存されます。"
+                    )
                 )
                 .card()
                 .padding(20)
@@ -67,7 +76,7 @@ private struct ProfileRow: View {
                 Text(profile.appName)
                     .font(.headline)
                     .lineLimit(1)
-                Text(profile.bundleIdentifier ?? "Sin identificador")
+                Text(profile.bundleIdentifier ?? L10n.shared.t("Sin identificador", "No identifier", "識別子なし"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -85,7 +94,7 @@ private struct ProfileRow: View {
             }
             .buttonStyle(.borderless)
             .foregroundStyle(.secondary)
-            .help("Olvidar nivel guardado")
+            .help(L10n.shared.t("Olvidar nivel guardado", "Forget saved level", "保存した音量を削除"))
         }
         .padding(.vertical, 9)
     }

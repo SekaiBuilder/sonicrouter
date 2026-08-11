@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Compact panel shown from the menu bar — the fast path for "mute this call
@@ -7,10 +8,11 @@ struct MenuBarView: View {
     @EnvironmentObject private var appStore: ApplicationAudioStore
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
+    @ObservedObject private var l10n = L10n.shared
 
     private var playing: [AppAudioSession] {
         appStore.sessions
-            .filter { $0.isProducingAudio || $0.isMuted || $0.isVolumeEngaged || $0.desiredVolume < 0.999 }
+            .filter { $0.isProducingAudio || $0.isMuted || $0.isVolumeEngaged || $0.desiredVolume < 0.999 || $0.desiredOutputUID != nil }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
@@ -37,8 +39,8 @@ struct MenuBarView: View {
             if playing.isEmpty {
                 EmptyHint(
                     symbol: "speaker.slash",
-                    title: "Nada suena ahora",
-                    subtitle: "Reproduce algo y aparecerá aquí."
+                    title: l10n.t("Nada suena ahora", "Nothing is playing", "再生中の音声はありません"),
+                    subtitle: l10n.t("Reproduce algo y aparecerá aquí.", "Play something and it will appear here.", "何かを再生するとここに表示されます。")
                 )
             } else {
                 VStack(spacing: 2) {
@@ -49,7 +51,11 @@ struct MenuBarView: View {
                             onMute: { appStore.setMuted($0, for: session) },
                             onVolume: { appStore.setVolume($0, for: session) },
                             onCommit: { appStore.commitVolume(for: session) },
-                            onReset: { appStore.reset(session) }
+                            onReset: { appStore.reset(session) },
+                            outputDevices: audioStore.outputDevices.filter {
+                                $0.uid != SonicRouterAudioIdentifiers.legacyVirtualDeviceUID
+                            },
+                            onSelectOutput: { appStore.setOutputDevice($0, for: session) }
                         )
                     }
                 }
@@ -60,19 +66,31 @@ struct MenuBarView: View {
         }
         .padding(14)
         .frame(width: 340)
-        .task {
-            appStore.refresh()
-            audioStore.refresh()
+        .onAppear {
+            appStore.setInterfaceVisible(.menuBar, true)
+            audioStore.setInterfaceVisible(.menuBar, true)
+        }
+        .onDisappear {
+            appStore.setInterfaceVisible(.menuBar, false)
+            audioStore.setInterfaceVisible(.menuBar, false)
         }
     }
 
     private var header: some View {
         HStack(spacing: 8) {
-            Image(systemName: "slider.vertical.3")
-                .foregroundStyle(Theme.accent)
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 22, height: 22)
             Text("SonicRouter")
                 .font(.headline)
             Spacer()
+            PowerModeChip(
+                mode: appStore.powerMode,
+                isSuspended: appStore.isManuallySuspended,
+                onToggleSuspend: { appStore.setManuallySuspended(!appStore.isManuallySuspended) },
+                onQuit: { NSApp.terminate(nil) }
+            )
             Button {
                 appStore.refresh()
                 audioStore.refresh()
@@ -80,7 +98,7 @@ struct MenuBarView: View {
                 Image(systemName: "arrow.clockwise")
             }
             .buttonStyle(.borderless)
-            .help("Actualizar")
+            .help(l10n.t("Actualizar", "Refresh", "更新"))
         }
     }
 
@@ -90,16 +108,17 @@ struct MenuBarView: View {
                 AppDelegate.showInDock()
                 openWindow(id: "main")
             } label: {
-                Label("Abrir ventana", systemImage: "macwindow")
+                Label(l10n.t("Abrir ventana", "Open window", "ウインドウを開く"), systemImage: "macwindow")
             }
             .buttonStyle(.borderless)
+            .foregroundStyle(Theme.accent)
 
             Spacer()
 
             Button {
                 appStore.resetAllControls()
             } label: {
-                Label("Restaurar audio", systemImage: "arrow.uturn.backward.circle")
+                Label(l10n.t("Restaurar audio", "Restore audio", "オーディオを復元"), systemImage: "arrow.uturn.backward.circle")
             }
             .buttonStyle(.borderless)
             .foregroundStyle(.secondary)
@@ -112,12 +131,12 @@ struct MenuBarView: View {
             }
             .buttonStyle(.borderless)
             .foregroundStyle(.secondary)
-            .help("Ajustes")
+            .help(l10n.t("Ajustes", "Settings", "設定"))
 
             Button {
                 NSApp.terminate(nil)
             } label: {
-                Text("Salir")
+                Text(l10n.t("Salir", "Quit", "終了"))
             }
             .buttonStyle(.borderless)
             .foregroundStyle(.secondary)

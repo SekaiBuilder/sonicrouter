@@ -147,6 +147,98 @@ struct PlayingBars: View {
     }
 }
 
+// MARK: - Power mode chip
+
+/// Live readout of how hard the app is working — green leaf when idle, accent
+/// bolt when actively watching audio, moon when suspended. When handlers are
+/// passed it becomes a click target: a menu to suspend/resume or quit the app.
+struct PowerModeChip: View {
+    let mode: SonicRouterPowerMode
+    var isSuspended: Bool = false
+    var onToggleSuspend: (() -> Void)? = nil
+    var onQuit: (() -> Void)? = nil
+    @ObservedObject private var l10n = L10n.shared
+
+    var body: some View {
+        if onToggleSuspend != nil || onQuit != nil {
+            Menu {
+                if let onToggleSuspend {
+                    Button {
+                        onToggleSuspend()
+                    } label: {
+                        Label(
+                            isSuspended
+                                ? l10n.t("Reanudar", "Resume", "再開")
+                                : l10n.t("Suspender", "Suspend", "一時停止"),
+                            systemImage: isSuspended ? "play.fill" : "pause.fill"
+                        )
+                    }
+                }
+                if let onQuit {
+                    Divider()
+                    Button(role: .destructive) {
+                        onQuit()
+                    } label: {
+                        Label(l10n.t("Salir de SonicRouter", "Quit SonicRouter", "SonicRouterを終了"), systemImage: "power")
+                    }
+                }
+            } label: {
+                chip
+            }
+            .menuStyle(.button)
+            .menuIndicator(.hidden)
+            .buttonStyle(.plain)
+            .fixedSize()
+        } else {
+            chip
+        }
+    }
+
+    private var modeLabel: String {
+        switch mode {
+        case .active: l10n.t("Activo", "Active", "稼働中")
+        case .idle: l10n.t("En reposo", "Idle", "待機中")
+        case .suspended: l10n.t("Suspendido", "Suspended", "停止中")
+        }
+    }
+
+    private var modeDetail: String {
+        switch mode {
+        case .active: l10n.t("Vigilando audio en vivo", "Watching live audio", "オーディオを監視中")
+        case .idle: l10n.t("Sin escuchas activas — consumo mínimo", "No active listeners — minimal usage", "監視なし — 最小消費")
+        case .suspended: l10n.t("Motores liberados", "Engines released", "エンジン解放済み")
+        }
+    }
+
+    private var chip: some View {
+        HStack(spacing: 4) {
+            Image(systemName: mode.symbol)
+                .imageScale(.small)
+                .contentTransition(.symbolEffect(.replace))
+            Text(modeLabel)
+        }
+        .font(.caption2.weight(.medium))
+        .foregroundStyle(tint)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 2)
+        .background(tint.opacity(0.14), in: Capsule())
+        .help(actionable ? l10n.t("Tócalo para suspender o salir", "Click to suspend or quit", "クリックで一時停止・終了") : modeDetail)
+        .animation(.easeInOut(duration: 0.2), value: mode)
+    }
+
+    private var actionable: Bool {
+        onToggleSuspend != nil || onQuit != nil
+    }
+
+    private var tint: Color {
+        switch mode {
+        case .active: Theme.accent
+        case .idle: .green
+        case .suspended: .secondary
+        }
+    }
+}
+
 // MARK: - Volume slider
 
 struct AppVolumeSlider: View {
@@ -189,11 +281,16 @@ struct AppMixerRow: View {
     var onVolume: (Double) -> Void
     var onCommit: () -> Void
     var onReset: () -> Void
+    /// Output devices the app can be sent to. When empty, the output picker is
+    /// hidden (e.g. the compact menu-bar panel).
+    var outputDevices: [AudioDevice] = []
+    var onSelectOutput: ((String?) -> Void)?
 
     @State private var volume: Double = 1
+    @State private var isHovered = false
 
     private var isControlled: Bool {
-        session.isMuted || session.isVolumeEngaged || session.desiredVolume < 0.999
+        session.isMuted || session.isVolumeEngaged || session.desiredVolume < 0.999 || session.desiredOutputUID != nil
     }
 
     var body: some View {
@@ -236,6 +333,10 @@ struct AppMixerRow: View {
                 }
             }
 
+            if let onSelectOutput, !outputDevices.isEmpty, session.supportsVolumeControl {
+                outputPicker(onSelectOutput)
+            }
+
             muteButton
 
             if !compact && isControlled {
@@ -244,11 +345,17 @@ struct AppMixerRow: View {
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
-                .help("Restablecer a volumen normal")
+                .help(L10n.shared.t("Restablecer a volumen normal", "Reset to normal volume", "通常の音量に戻す"))
             }
         }
         .padding(.vertical, compact ? 6 : 9)
-        .padding(.horizontal, compact ? 4 : 2)
+        .padding(.horizontal, compact ? 4 : 6)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(!compact && isHovered ? Color.primary.opacity(0.045) : .clear)
+        )
+        .onHover { isHovered = $0 }
+        .animation(.easeOut(duration: 0.12), value: isHovered)
         .onAppear { volume = session.desiredVolume }
         .onChange(of: session.desiredVolume) { _, newValue in
             if abs(newValue - volume) > 0.001 { volume = newValue }
@@ -260,7 +367,11 @@ struct AppMixerRow: View {
             Image(systemName: session.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
                 .font(.caption2)
                 .foregroundStyle(session.isMuted ? Color.red : .secondary)
-            Text(session.isMuted ? "Silenciada" : (session.isProducingAudio ? "Sonando" : "En pausa"))
+            Text(session.isMuted
+                 ? L10n.shared.t("Silenciada", "Muted", "ミュート中")
+                 : (session.isProducingAudio
+                    ? L10n.shared.t("Sonando", "Playing", "再生中")
+                    : L10n.shared.t("En pausa", "Paused", "一時停止中")))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -284,7 +395,9 @@ struct AppMixerRow: View {
                     onMute(!session.isMuted)
                 } label: {
                     Label(
-                        session.isMuted ? "Activar" : "Silenciar",
+                        session.isMuted
+                            ? L10n.shared.t("Activar", "Unmute", "ミュート解除")
+                            : L10n.shared.t("Silenciar", "Mute", "ミュート"),
                         systemImage: session.isMuted ? "speaker.wave.2.fill" : "speaker.slash.fill"
                     )
                     .foregroundStyle(session.isMuted ? Theme.accent : Color.red)
@@ -293,7 +406,9 @@ struct AppMixerRow: View {
             }
         }
         .disabled(!session.isControllable)
-        .help(session.isMuted ? "Activar sonido" : "Silenciar app")
+        .help(session.isMuted
+              ? L10n.shared.t("Activar sonido", "Unmute", "ミュートを解除")
+              : L10n.shared.t("Silenciar app", "Mute app", "アプリをミュート"))
     }
 
     private var detailText: String? {
@@ -302,6 +417,41 @@ struct AppMixerRow: View {
         }
         return session.bundleIdentifier
     }
+
+    @ViewBuilder
+    private func outputPicker(_ onSelect: @escaping (String?) -> Void) -> some View {
+        let selected = session.desiredOutputUID
+        Menu {
+            Button {
+                onSelect(nil)
+            } label: {
+                if selected == nil {
+                    Label(L10n.shared.t("Salida predeterminada", "Default output", "既定の出力"), systemImage: "checkmark")
+                } else {
+                    Text(L10n.shared.t("Salida predeterminada", "Default output", "既定の出力"))
+                }
+            }
+            Divider()
+            ForEach(outputDevices) { device in
+                Button {
+                    onSelect(device.uid)
+                } label: {
+                    if selected == device.uid {
+                        Label(device.name, systemImage: "checkmark")
+                    } else {
+                        Text(device.name)
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "airplayaudio")
+                .foregroundStyle(selected == nil ? Color.secondary : Theme.accent)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(L10n.shared.t("Enviar esta app a otra salida", "Send this app to another output", "このアプリを別の出力へ"))
+    }
 }
 
 // MARK: - Permission banner
@@ -309,6 +459,7 @@ struct AppMixerRow: View {
 struct PermissionBanner: View {
     var onRetry: () -> Void
     var onOpenSettings: () -> Void
+    @ObservedObject private var l10n = L10n.shared
 
     var body: some View {
         HStack(spacing: 12) {
@@ -316,18 +467,22 @@ struct PermissionBanner: View {
                 .font(.title2)
                 .foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Falta permiso de captura de audio")
+                Text(l10n.t("Falta permiso de captura de audio", "Audio capture permission missing", "オーディオキャプチャの権限がありません"))
                     .font(.subheadline.weight(.semibold))
-                Text("Para silenciar y ajustar el volumen de cada app, autoriza la grabación de audio del sistema y vuelve a intentar.")
+                Text(l10n.t(
+                    "Para silenciar y ajustar el volumen de cada app, autoriza la grabación de audio del sistema y vuelve a intentar.",
+                    "To mute and adjust each app's volume, allow system audio recording and try again.",
+                    "各アプリの音量調整・ミュートには、システム音声の録音を許可して再試行してください。"
+                ))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
             VStack(spacing: 6) {
-                Button("Reintentar", action: onRetry)
+                Button(l10n.t("Reintentar", "Retry", "再試行"), action: onRetry)
                     .buttonStyle(.borderedProminent)
-                Button("Abrir Ajustes", action: onOpenSettings)
+                Button(l10n.t("Abrir Ajustes", "Open Settings", "設定を開く"), action: onOpenSettings)
                     .buttonStyle(.link)
                     .font(.caption)
             }

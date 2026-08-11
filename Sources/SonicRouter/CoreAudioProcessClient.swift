@@ -33,6 +33,33 @@ enum CoreAudioProcessClient {
         ids.map { stringProperty(kAudioObjectPropertyName, objectID: $0) }
             .filter { !$0.isEmpty }
     }
+
+    /// Translates a PID to its HAL process object. Unlike scanning the process
+    /// list, this works even when the process is not rendering audio yet — which
+    /// is exactly the case when SonicRouter must exclude ITSELF from a global tap
+    /// before its own IOProc starts (otherwise the tap captures our re-emission
+    /// and the output feeds back on itself in an infinite loop).
+    static func processObjectID(forPID pid: pid_t) -> AudioObjectID? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyTranslatePIDToProcessObject,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var pidValue = pid
+        var objectID = AudioObjectID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        let status = withUnsafePointer(to: &pidValue) { pidPointer in
+            AudioObjectGetPropertyData(
+                AudioObjectID(kAudioObjectSystemObject),
+                &address,
+                UInt32(MemoryLayout<pid_t>.size),
+                pidPointer,
+                &size,
+                &objectID
+            )
+        }
+        return (status == noErr && objectID != kAudioObjectUnknown) ? objectID : nil
+    }
 }
 
 private extension CoreAudioProcessClient {

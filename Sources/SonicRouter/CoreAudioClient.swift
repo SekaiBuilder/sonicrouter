@@ -13,6 +13,9 @@ enum CoreAudioClient {
         let defaultSystemOutput = defaultDevice(selector: kAudioHardwarePropertyDefaultSystemOutputDevice)
 
         return ids.compactMap { id in
+            let uid = stringProperty(kAudioDevicePropertyDeviceUID, objectID: id)
+            guard !SonicRouterAudioIdentifiers.isInternalDeviceUID(uid) else { return nil }
+
             let hasOutput = streamCount(for: id, scope: kAudioDevicePropertyScopeOutput) > 0
             let hasInput = streamCount(for: id, scope: kAudioDevicePropertyScopeInput) > 0
 
@@ -21,7 +24,7 @@ enum CoreAudioClient {
             return AudioDevice(
                 id: id,
                 name: stringProperty(kAudioObjectPropertyName, objectID: id),
-                uid: stringProperty(kAudioDevicePropertyDeviceUID, objectID: id),
+                uid: uid,
                 hasInput: hasInput,
                 hasOutput: hasOutput,
                 outputVolume: hasOutput ? volume(for: id, scope: kAudioDevicePropertyScopeOutput) : nil,

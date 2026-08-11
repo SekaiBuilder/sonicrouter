@@ -2,6 +2,7 @@ import SwiftUI
 
 struct DeviceMixerView: View {
     @EnvironmentObject private var audioStore: AudioDeviceStore
+    @ObservedObject private var l10n = L10n.shared
 
     private let columns = [
         GridItem(.adaptive(minimum: 300, maximum: 420), spacing: 14, alignment: .top)
@@ -10,8 +11,12 @@ struct DeviceMixerView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HeaderView(
-                title: "Dispositivos",
-                subtitle: "\(audioStore.outputDevices.count) salidas · \(audioStore.inputDevices.count) entradas"
+                title: l10n.t("Dispositivos", "Devices", "デバイス"),
+                subtitle: l10n.t(
+                    "\(audioStore.outputDevices.count) salidas · \(audioStore.inputDevices.count) entradas",
+                    "\(audioStore.outputDevices.count) outputs · \(audioStore.inputDevices.count) inputs",
+                    "出力 \(audioStore.outputDevices.count) · 入力 \(audioStore.inputDevices.count)"
+                )
             )
 
             ScrollView {
@@ -20,7 +25,7 @@ struct DeviceMixerView: View {
                         ActiveOutputStrip(device: defaultOutput)
                     }
 
-                    DeviceSection(title: "Salidas") {
+                    DeviceSection(title: l10n.t("Salidas", "Outputs", "出力")) {
                         LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
                             ForEach(audioStore.outputDevices) { device in
                                 DeviceCard(device: device, mode: .output)
@@ -28,7 +33,7 @@ struct DeviceMixerView: View {
                         }
                     }
 
-                    DeviceSection(title: "Entradas") {
+                    DeviceSection(title: l10n.t("Entradas", "Inputs", "入力")) {
                         LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
                             ForEach(audioStore.inputDevices) { device in
                                 DeviceCard(device: device, mode: .input)
@@ -56,7 +61,7 @@ private struct ActiveOutputStrip: View {
                 Text(device.name)
                     .font(.headline)
                     .lineLimit(1)
-                Text("Salida del sistema")
+                Text(L10n.shared.t("Salida del sistema", "System output", "システム出力"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -103,13 +108,13 @@ private struct DeviceCard: View {
                         .lineLimit(2)
                     HStack(spacing: 6) {
                         if device.isDefaultOutput && mode == .output {
-                            Badge(text: "salida")
+                            Badge(text: L10n.shared.t("salida", "output", "出力"))
                         }
                         if device.isDefaultInput && mode == .input {
-                            Badge(text: "entrada")
+                            Badge(text: L10n.shared.t("entrada", "input", "入力"))
                         }
                         if device.isDefaultSystemOutput && mode == .output {
-                            Badge(text: "sistema")
+                            Badge(text: L10n.shared.t("sistema", "system", "システム"))
                         }
                     }
                 }
@@ -117,7 +122,9 @@ private struct DeviceCard: View {
             }
 
             VolumeControl(
-                title: mode == .output ? "Volumen" : "Entrada",
+                title: mode == .output
+                    ? L10n.shared.t("Volumen", "Volume", "音量")
+                    : L10n.shared.t("Entrada", "Input", "入力"),
                 symbol: mode == .output ? "speaker.wave.3" : "mic",
                 value: mode == .output ? device.outputVolume : device.inputVolume,
                 onChange: { value in
@@ -136,8 +143,13 @@ private struct DeviceCard: View {
                     audioStore.makeDefaultInput(device)
                 }
             } label: {
-                Label(mode == .output ? "Usar salida" : "Usar entrada", systemImage: "checkmark.circle")
-                    .frame(maxWidth: .infinity)
+                Label(
+                    mode == .output
+                        ? L10n.shared.t("Usar salida", "Use as output", "出力に設定")
+                        : L10n.shared.t("Usar entrada", "Use as input", "入力に設定"),
+                    systemImage: "checkmark.circle"
+                )
+                .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
@@ -191,7 +203,7 @@ private struct VolumeControl: View {
             } else {
                 HStack(spacing: 8) {
                     Image(systemName: "lock")
-                    Text("Sin control")
+                    Text(L10n.shared.t("Sin control", "No control", "調整不可"))
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -200,7 +212,7 @@ private struct VolumeControl: View {
     }
 
     private var valueText: String {
-        guard value != nil else { return "bloqueado" }
+        guard value != nil else { return L10n.shared.t("bloqueado", "locked", "ロック") }
         return "\(Int(draftValue * 100))%"
     }
 

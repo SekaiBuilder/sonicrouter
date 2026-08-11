@@ -11,8 +11,8 @@ su máquina. Interioriza los principios de abajo antes de mandar cambios.
 2. **Limpia siempre lo que creas.** Todo tap o dispositivo agregado debe llevar el prefijo
    `local.sonicrouter.*` y destruirse en `invalidate()` / al cerrar. Un objeto de audio
    huérfano deja el sistema en mal estado.
-3. **Falla seguro.** Si la activación de un motor falla a medias, deshaz lo que hiciste
-   (`invalidate()` / `tearDownAll`) en lugar de dejar un tap colgado.
+3. **Falla seguro.** Toda activación incompleta debe ejecutar `invalidate()`. Al sustituir
+   un motor vivo, conserva el anterior hasta que el reemplazo haya arrancado correctamente.
 4. **Mantén los docs en sync.** Si cambias el comportamiento, actualiza `README.md` y, si
    toca la privacidad, `SECURITY.md`.
 
@@ -26,11 +26,16 @@ swift run
 chmod +x Scripts/build-app.sh
 Scripts/build-app.sh
 open build/SonicRouter.app
+
+# Política pura y compilación estricta:
+Scripts/test.sh
+swift build -Xswiftc -warnings-as-errors
 ```
 
 - macOS 15+ y la toolchain de Swift instalada.
 - El proyecto compila con **Swift 6** y concurrencia estricta; mantén el build **sin
-  warnings**.
+  warnings**. `Scripts/build-app.sh` genera un binario universal salvo que se defina
+  `SONICROUTER_UNIVERSAL=0`.
 
 ## Disciplina de código
 
