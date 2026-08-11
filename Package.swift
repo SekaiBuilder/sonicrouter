@@ -11,9 +11,19 @@ let package = Package(
         .executable(name: "SonicRouter", targets: ["SonicRouter"])
     ],
     targets: [
+        .target(
+            name: "SonicRouterCore",
+            path: "Sources/SonicRouterCore"
+        ),
         .executableTarget(
             name: "SonicRouter",
+            dependencies: ["SonicRouterCore"],
             path: "Sources/SonicRouter"
+        ),
+        .executableTarget(
+            name: "SonicRouterPolicyTests",
+            dependencies: ["SonicRouterCore"],
+            path: "Tests/SonicRouterPolicyTests"
         )
     ]
 )
