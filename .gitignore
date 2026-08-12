@@ -6,3 +6,6 @@ build/
 .claude/
 .codegraph/
 .vscode/
+
+# Icono personalizado de carpeta (macOS)
+Icon?
