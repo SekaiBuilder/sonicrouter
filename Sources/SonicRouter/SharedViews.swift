@@ -326,6 +326,10 @@ struct AppMixerRow: View {
                         }
                     )
                     .onChange(of: volume) { _, newValue in
+                        // Only user edits reach the store. The syncs from
+                        // `onAppear` / `session.desiredVolume` below would
+                        // otherwise re-apply the same value on every render.
+                        guard abs(newValue - session.desiredVolume) > 0.001 else { return }
                         onVolume(newValue)
                     }
                 } else {
