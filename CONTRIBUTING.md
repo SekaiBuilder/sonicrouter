@@ -36,6 +36,10 @@ swift build -Xswiftc -warnings-as-errors
 - El proyecto compila con **Swift 6** y concurrencia estricta; mantén el build **sin
   warnings**. `Scripts/build-app.sh` genera un binario universal salvo que se defina
   `SONICROUTER_UNIVERSAL=0`.
+- Las pruebas (`SonicRouterPolicyTests`) son un **ejecutable**, no un `testTarget`: las
+  Command Line Tools no incluyen XCTest ni el módulo `Testing` donde SwiftPM los busca,
+  así que `swift test` responde «no tests found» sin Xcode. Lánzalas siempre con
+  `Scripts/test.sh` (funciona con y sin Xcode).
 
 ## Disciplina de código
 
