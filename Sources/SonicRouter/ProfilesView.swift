@@ -81,6 +81,11 @@ private struct ProfileRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                Label(routeText, systemImage: profile.outputDeviceUID == nil ? "speaker.wave.2" : "airplayaudio")
+                    .font(.caption)
+                    .foregroundStyle(routeColor)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
 
             Spacer()
@@ -97,5 +102,24 @@ private struct ProfileRow: View {
             .help(L10n.shared.t("Olvidar nivel guardado", "Forget saved level", "保存した音量を削除"))
         }
         .padding(.vertical, 9)
+    }
+
+    private var routeDevice: AudioDevice? {
+        guard let uid = profile.outputDeviceUID else { return nil }
+        return devices.first { $0.uid == uid }
+    }
+
+    /// Where the app is sent when the profile is restored: the system default,
+    /// a specific output, or one that is not connected right now.
+    private var routeText: String {
+        guard profile.outputDeviceUID != nil else {
+            return L10n.shared.t("Salida predeterminada", "Default output", "既定の出力")
+        }
+        return routeDevice?.name ?? L10n.shared.t("Salida no conectada", "Output not connected", "出力が未接続")
+    }
+
+    private var routeColor: Color {
+        guard profile.outputDeviceUID != nil else { return .secondary }
+        return routeDevice == nil ? .orange : Theme.accent
     }
 }
