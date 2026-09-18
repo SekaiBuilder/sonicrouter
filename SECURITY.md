@@ -75,6 +75,9 @@ están en `StereoRender` y los `IOBlock` de `MuteEngine` / `AppVolumeTap`
   que no aparecen como salidas seleccionables para otras apps.
 - **Preferencias en `UserDefaults`.** Solo nombres de app, UID de dispositivo y volúmenes;
   nada sensible.
+- **Ítem de inicio de sesión (opcional).** «Abrir al iniciar sesión» usa la API oficial
+  `SMAppService`, está desactivado por defecto y se revisa o revoca en *Ajustes del
+  Sistema → General → Ítems de inicio*.
 
 ## 7. Valores por defecto seguros
 

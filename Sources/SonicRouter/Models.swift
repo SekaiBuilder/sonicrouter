@@ -8,6 +8,13 @@ typealias AudioProfileMatcher = SonicRouterCore.AudioProfileMatcher
 typealias AudioGainPolicy = SonicRouterCore.AudioGainPolicy
 typealias SonicRouterAudioIdentifiers = SonicRouterCore.SonicRouterAudioIdentifiers
 
+/// UserDefaults keys shared by Settings and the app delegate.
+enum StartupPreferences {
+    /// When set, the main window is suppressed at launch and the app starts as
+    /// a menu bar item only.
+    static let startInMenuBarKey = "SonicRouter.StartInMenuBar"
+}
+
 enum SonicRouterInterfaceSurface: Hashable {
     case mainWindow
     case menuBar

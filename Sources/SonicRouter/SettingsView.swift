@@ -4,10 +4,13 @@ struct SettingsView: View {
     @EnvironmentObject private var audioStore: AudioDeviceStore
     @EnvironmentObject private var appStore: ApplicationAudioStore
     @ObservedObject private var l10n = L10n.shared
+    @StateObject private var launchAtLogin = LaunchAtLoginController()
+    @AppStorage(StartupPreferences.startInMenuBarKey) private var startInMenuBar = false
 
     var body: some View {
         Form {
             languageSection
+            startupSection
 
             Section(l10n.t("Permiso de captura de audio", "Audio capture permission", "オーディオキャプチャの権限")) {
                 LabeledContent(l10n.t("Estado", "Status", "状態")) {
@@ -124,6 +127,7 @@ struct SettingsView: View {
         .onAppear {
             audioStore.setInterfaceVisible(.settings, true)
             appStore.setInterfaceVisible(.settings, true)
+            launchAtLogin.refresh()
         }
         .onDisappear {
             audioStore.setInterfaceVisible(.settings, false)
@@ -140,6 +144,65 @@ struct SettingsView: View {
             }
             .pickerStyle(.menu)
         }
+    }
+
+    private var startupSection: some View {
+        Section(l10n.t("Inicio", "Startup", "起動")) {
+            Toggle(isOn: launchAtLoginBinding) {
+                Text(l10n.t("Abrir al iniciar sesión", "Launch at login", "ログイン時に起動"))
+            }
+            .disabled(!launchAtLogin.isAvailable)
+            if let detail = launchAtLoginDetail {
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(launchAtLogin.errorMessage == nil ? Color.secondary : Color.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if launchAtLogin.needsApproval {
+                Button {
+                    launchAtLogin.openSystemSettings()
+                } label: {
+                    Label(l10n.t("Abrir Ítems de inicio", "Open Login Items", "ログイン項目を開く"), systemImage: "gearshape")
+                }
+            }
+            Toggle(isOn: $startInMenuBar) {
+                Text(l10n.t("Iniciar solo en la barra de menús", "Start in the menu bar only", "メニューバーのみで起動"))
+            }
+            Text(l10n.t(
+                "Sin ventana ni icono en el Dock al arrancar; ábrela desde el icono de la barra de menús. Se aplica en el próximo inicio.",
+                "No window or Dock icon at launch; open it from the menu bar icon. Takes effect on the next launch.",
+                "起動時にウインドウやDockアイコンを表示せず、メニューバーのアイコンから開きます。次回の起動から適用されます。"
+            ))
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var launchAtLoginBinding: Binding<Bool> {
+        Binding(
+            get: { launchAtLogin.isEnabled },
+            set: { launchAtLogin.setEnabled($0) }
+        )
+    }
+
+    private var launchAtLoginDetail: String? {
+        if !launchAtLogin.isAvailable {
+            return l10n.t(
+                "Disponible solo al ejecutar SonicRouter.app.",
+                "Only available when running SonicRouter.app.",
+                "SonicRouter.appとして実行している場合のみ利用できます。"
+            )
+        }
+        if let error = launchAtLogin.errorMessage { return error }
+        if launchAtLogin.needsApproval {
+            return l10n.t(
+                "Pendiente de aprobación en Ajustes del Sistema → Ítems de inicio.",
+                "Waiting for approval in System Settings → Login Items.",
+                "システム設定 → ログイン項目 での承認待ちです。"
+            )
+        }
+        return nil
     }
 
     private var permissionText: String {
