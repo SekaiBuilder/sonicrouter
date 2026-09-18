@@ -28,10 +28,13 @@ Al cerrar la ventana, la app sigue viva en la barra de menús (arriba a la derec
 - **Restaurar todo**: botón de emergencia que quita todos los taps y devuelve el audio a la normalidad (también se ejecuta al cerrar la app).
 - **Consumo mínimo en segundo plano**: no hay bucle de sondeo. SonicRouter reacciona a eventos de Core Audio y del sistema, y cuando no hay ventana abierta ni nada controlado entra en modo **«En reposo»** soltando todas las escuchas. El modo de energía actual (Activo / En reposo / Suspendido) se ve en vivo en la barra de estado, el panel de la barra de menús y Ajustes.
 - Gestión de dispositivos CoreAudio: cambiar salida/entrada predeterminada y su volumen.
+- **Tres idiomas**: español, inglés y japonés. Sigue el idioma del sistema o se fija en Ajustes → Idioma; el diálogo de permiso de macOS también aparece traducido.
+- **Inicio a tu gusto**: «Abrir al iniciar sesión» (ítem de inicio oficial de macOS) e «Iniciar solo en la barra de menús», sin ventana ni icono en el Dock hasta que la pidas (Ajustes → Inicio).
+- **Atajos y estado a la vista**: ⌘1 Mezclador, ⌘2 Dispositivos, ⌘3 Guardados, ⌘R actualizar y ⌘, Ajustes. La ventana recuerda la última sección abierta, la lista de guardados muestra a qué salida va cada app y el icono de la barra de menús pasa a un altavoz tachado mientras haya alguna app silenciada.
 
 ## Permiso necesario
 
-Los Process Taps requieren el permiso de **captura de audio del sistema** (TCC). La primera vez que silencias algo, macOS pedirá autorización. El `Info.plist` incluye `NSAudioCaptureUsageDescription`.
+Los Process Taps requieren el permiso de **captura de audio del sistema** (TCC). La primera vez que silencias algo, macOS pedirá autorización. El `Info.plist` incluye `NSAudioCaptureUsageDescription` (en español, inglés y japonés).
 
 > Importante: este permiso solo funciona ejecutando la app como `.app` (no con `swift run`). Si silenciar no hace nada, abre **Ajustes → Privacidad y seguridad → Grabación de audio / Micrófono**, activa SonicRouter y pulsa **Reintentar** en el banner.
 
