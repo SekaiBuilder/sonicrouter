@@ -113,7 +113,8 @@ struct AppIconView: View {
 
     private var fallbackSymbol: String {
         let name = session.name.lowercased()
-        if name.contains("facetime") || name.contains("llamada") || name.contains("teléfono") {
+        let callMarkers = ["facetime", "llamada", "teléfono", "call", "phone", "通話", "電話"]
+        if callMarkers.contains(where: { name.contains($0) }) {
             return "phone.fill"
         }
         return "waveform"

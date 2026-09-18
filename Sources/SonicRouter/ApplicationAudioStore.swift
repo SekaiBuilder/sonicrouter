@@ -1074,21 +1074,21 @@ final class ApplicationAudioStore: ObservableObject {
             return bundleID
         }
         if let pid = processInfo?.processIdentifier {
-            return "Proceso \(pid)"
+            return L10n.shared.t("Proceso \(pid)", "Process \(pid)", "プロセス \(pid)")
         }
-        return "App desconocida"
+        return L10n.shared.t("App desconocida", "Unknown app", "不明なアプリ")
     }
 
     private func mappedSystemAudioName(bundleIdentifier: String?, processName: String?) -> String? {
         let identifiers = [bundleIdentifier, processName].compactMap { $0?.lowercased() }
         if identifiers.contains(where: { $0.contains("avconferenced") }) {
-            return "FaceTime / Llamada Apple"
+            return L10n.shared.t("FaceTime / Llamada Apple", "FaceTime / Apple call", "FaceTime / Apple通話")
         }
         if identifiers.contains(where: { $0.contains("callservicesd") }) {
-            return "FaceTime / Teléfono"
+            return L10n.shared.t("FaceTime / Teléfono", "FaceTime / Phone", "FaceTime / 電話")
         }
         if identifiers.contains(where: { $0.contains("rapportd") }) {
-            return "Continuity / Llamada Apple"
+            return L10n.shared.t("Continuity / Llamada Apple", "Continuity / Apple call", "Continuity / Apple通話")
         }
         return nil
     }

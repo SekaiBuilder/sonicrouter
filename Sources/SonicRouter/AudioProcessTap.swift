@@ -10,12 +10,63 @@ private let tapLog = Logger(subsystem: "local.sonicrouter.app", category: "Proce
 // MARK: - Errors
 
 enum TapError: LocalizedError {
-    case coreAudio(String, OSStatus)
+    case coreAudio(TapAction, OSStatus)
 
     var errorDescription: String? {
         switch self {
         case let .coreAudio(action, status):
-            return "No se pudo \(action). CoreAudio devolvió \(FourCC.string(status))."
+            let code = FourCC.string(status)
+            return L10n.text(
+                "No se pudo \(action.spanish). CoreAudio devolvió \(code).",
+                "Could not \(action.english). CoreAudio returned \(code).",
+                "\(action.japanese)できませんでした。CoreAudioの応答: \(code)"
+            )
+        }
+    }
+}
+
+/// The activation step that failed, so the error can be phrased in the user's
+/// language instead of carrying a fixed Spanish string.
+enum TapAction {
+    case createMuteTap, createMuteDevice, prepareMute, startMute
+    case createVolumeTap, createVolumeDevice, prepareVolume, startVolume
+
+    var spanish: String {
+        switch self {
+        case .createMuteTap: "crear el tap de mute"
+        case .createMuteDevice: "crear el dispositivo de mute"
+        case .prepareMute: "preparar el mute"
+        case .startMute: "arrancar el mute"
+        case .createVolumeTap: "crear el tap de volumen"
+        case .createVolumeDevice: "crear el dispositivo de volumen"
+        case .prepareVolume: "preparar el volumen"
+        case .startVolume: "arrancar el volumen"
+        }
+    }
+
+    var english: String {
+        switch self {
+        case .createMuteTap: "create the mute tap"
+        case .createMuteDevice: "create the mute device"
+        case .prepareMute: "prepare the mute"
+        case .startMute: "start the mute"
+        case .createVolumeTap: "create the volume tap"
+        case .createVolumeDevice: "create the volume device"
+        case .prepareVolume: "prepare the volume control"
+        case .startVolume: "start the volume control"
+        }
+    }
+
+    var japanese: String {
+        switch self {
+        case .createMuteTap: "ミュート用タップを作成"
+        case .createMuteDevice: "ミュート用デバイスを作成"
+        case .prepareMute: "ミュートを準備"
+        case .startMute: "ミュートを開始"
+        case .createVolumeTap: "音量用タップを作成"
+        case .createVolumeDevice: "音量用デバイスを作成"
+        case .prepareVolume: "音量制御を準備"
+        case .startVolume: "音量制御を開始"
         }
     }
 }
@@ -469,7 +520,7 @@ final class MuteEngine {
         var newTap = AudioObjectID(kAudioObjectUnknown)
         let tapStatus = AudioHardwareCreateProcessTap(description, &newTap)
         guard tapStatus == noErr, newTap != kAudioObjectUnknown else {
-            throw TapError.coreAudio("crear el tap de mute", tapStatus)
+            throw TapError.coreAudio(.createMuteTap, tapStatus)
         }
         tapID = newTap
 
@@ -484,7 +535,7 @@ final class MuteEngine {
         let aggStatus = AudioHardwareCreateAggregateDevice(composition, &newAggregate)
         guard aggStatus == noErr, newAggregate != kAudioObjectUnknown else {
             invalidate()
-            throw TapError.coreAudio("crear el dispositivo de mute", aggStatus)
+            throw TapError.coreAudio(.createMuteDevice, aggStatus)
         }
         aggregateID = newAggregate
         TapAggregate.matchSampleRate(aggregateID: aggregateID, to: outputDeviceID)
@@ -500,14 +551,14 @@ final class MuteEngine {
         let procStatus = AudioDeviceCreateIOProcIDWithBlock(&newProcID, aggregateID, nil, ioBlock)
         guard procStatus == noErr, let newProcID else {
             invalidate()
-            throw TapError.coreAudio("preparar el mute", procStatus)
+            throw TapError.coreAudio(.prepareMute, procStatus)
         }
         ioProcID = newProcID
 
         let startStatus = AudioDeviceStart(aggregateID, newProcID)
         guard startStatus == noErr else {
             invalidate()
-            throw TapError.coreAudio("arrancar el mute", startStatus)
+            throw TapError.coreAudio(.startMute, startStatus)
         }
         self.outputUID = outputUID
         self.outputDeviceID = outputDeviceID
@@ -589,7 +640,7 @@ final class AppVolumeTap {
         var newTap = AudioObjectID(kAudioObjectUnknown)
         let tapStatus = AudioHardwareCreateProcessTap(description, &newTap)
         guard tapStatus == noErr, newTap != kAudioObjectUnknown else {
-            throw TapError.coreAudio("crear el tap de volumen", tapStatus)
+            throw TapError.coreAudio(.createVolumeTap, tapStatus)
         }
         tapID = newTap
 
@@ -605,7 +656,7 @@ final class AppVolumeTap {
         let aggStatus = AudioHardwareCreateAggregateDevice(composition, &newAggregate)
         guard aggStatus == noErr, newAggregate != kAudioObjectUnknown else {
             invalidate()
-            throw TapError.coreAudio("crear el dispositivo de volumen", aggStatus)
+            throw TapError.coreAudio(.createVolumeDevice, aggStatus)
         }
         aggregateID = newAggregate
         TapAggregate.matchSampleRate(aggregateID: aggregateID, to: outputDeviceID)
@@ -625,14 +676,14 @@ final class AppVolumeTap {
         let procStatus = AudioDeviceCreateIOProcIDWithBlock(&newProcID, aggregateID, nil, ioBlock)
         guard procStatus == noErr, let newProcID else {
             invalidate()
-            throw TapError.coreAudio("preparar el volumen", procStatus)
+            throw TapError.coreAudio(.prepareVolume, procStatus)
         }
         ioProcID = newProcID
 
         let startStatus = AudioDeviceStart(aggregateID, newProcID)
         guard startStatus == noErr else {
             invalidate()
-            throw TapError.coreAudio("arrancar el volumen", startStatus)
+            throw TapError.coreAudio(.startVolume, startStatus)
         }
         tapLog.debug("Volume engine active for pid \(self.pid) at gain \(self.gain)")
         logStreamFormats()
