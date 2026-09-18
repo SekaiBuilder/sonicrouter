@@ -13,8 +13,8 @@ final class ApplicationAudioStore: ObservableObject {
     @Published private(set) var sessions: [AppAudioSession] = []
     @Published var profiles: [AudioRouteProfile] = []
     @Published private(set) var activeAudioCount = 0
-    @Published private(set) var scannerStatus = "Buscando audio…"
-    @Published var controlStatus = "Listo"
+    @Published private(set) var scannerStatus = L10n.shared.t("Buscando audio…", "Scanning for audio…", "音声を検索中…")
+    @Published var controlStatus = L10n.shared.t("Listo", "Ready", "準備完了")
     @Published private(set) var permission: AudioPermission = .unknown
     /// Coarse, live view of how much work the app is doing. Drives the activity
     /// indicator in the UI and reflects the battery optimizations in real time.
@@ -310,7 +310,11 @@ final class ApplicationAudioStore: ObservableObject {
         if muted, permission != .granted {
             checkPermission()
             guard permission == .granted else {
-                controlStatus = "Falta permiso de captura de audio para silenciar \(session.name)."
+                controlStatus = L10n.shared.t(
+                    "Falta permiso de captura de audio para silenciar \(session.name).",
+                    "Audio capture permission is required to mute \(session.name).",
+                    "\(session.name)をミュートするにはオーディオキャプチャの権限が必要です。"
+                )
                 return
             }
         }
@@ -415,7 +419,11 @@ final class ApplicationAudioStore: ObservableObject {
         do {
             if control.wantsMute {
                 guard !processIDs.isEmpty else {
-                    controlStatus = "\(name) aún no tiene audio activo para controlar."
+                    controlStatus = L10n.shared.t(
+                        "\(name) aún no tiene audio activo para controlar.",
+                        "\(name) does not have active audio to control yet.",
+                        "\(name)にはまだ制御できる音声がありません。"
+                    )
                     return false
                 }
                 guard let output = targetOutput(for: control) else {
@@ -453,7 +461,11 @@ final class ApplicationAudioStore: ObservableObject {
             // the Mac's exact level without quitting SonicRouter.
             if control.wantsVolumeEngine {
                 guard !processIDs.isEmpty else {
-                    controlStatus = "\(name) aún no tiene audio activo para controlar."
+                    controlStatus = L10n.shared.t(
+                        "\(name) aún no tiene audio activo para controlar.",
+                        "\(name) does not have active audio to control yet.",
+                        "\(name)にはまだ制御できる音声がありません。"
+                    )
                     return false
                 }
                 guard let output = targetOutput(for: control) else {

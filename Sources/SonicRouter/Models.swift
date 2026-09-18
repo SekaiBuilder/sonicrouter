@@ -27,22 +27,7 @@ enum SonicRouterPowerMode: Hashable {
     /// so no IOProc keeps the audio hardware awake; restored on wake.
     case suspended
 
-    var label: String {
-        switch self {
-        case .active: "Activo"
-        case .idle: "En reposo"
-        case .suspended: "Suspendido"
-        }
-    }
-
-    var detail: String {
-        switch self {
-        case .active: "Vigilando audio en vivo"
-        case .idle: "Sin escuchas activas — consumo mínimo"
-        case .suspended: "Sistema en reposo — motores liberados"
-        }
-    }
-
+    /// Display text lives in `PowerModeChip`, which localizes it.
     var symbol: String {
         switch self {
         case .active: "bolt.fill"
