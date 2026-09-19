@@ -33,21 +33,22 @@ en lugar de insinuar garantías que no podemos cumplir.
 
 | Invariante | Garantía |
 |---|---|
-| **INV-1** | El audio capturado no se escribe a disco ni se envía por red — solo se reinyecta a la salida. |
+| **INV-1** | El audio capturado no se escribe a disco ni se envía por red — solo se reinyecta a la salida (el ecualizador lo filtra en memoria dentro del mismo IOProc). |
 | **INV-2** | El permiso de captura solo se solicita mediante la API oficial (`AudioHardwareCreateProcessTap`); el *probe* de permiso crea un tap **sin mute** y lo destruye al instante, sin afectar audio. |
 | **INV-3** | Todos los taps y dispositivos agregados creados por la app llevan el prefijo `local.sonicrouter.*` y se destruyen al iniciar, al cerrar y con «Restaurar todo». |
 | **INV-4** | «Restaurar todo» (y el cierre de la app) elimina todo tap/agregado propio y devuelve el audio del sistema a su estado nativo. |
 
 Estos puntos son auditables leyendo el código: las únicas operaciones sobre el audio
 están en `StereoRender` y los `IOBlock` de `MuteEngine` / `AppVolumeTap`
-(`Sources/SonicRouter/AudioProcessTap.swift`), y la limpieza en
+(`Sources/SonicRouter/AudioProcessTap.swift`) y en `RealtimeEqualizer`
+(`Sources/SonicRouterCore/Equalizer.swift`), y la limpieza en
 `SonicRouterAudioCleanup`.
 
 ## 4. Qué protege / respeta
 
 - **Solo controla el audio, no lo escucha.** El IOProc de mute emite silencio; el de
-  volumen multiplica las muestras por una ganancia. No hay ninguna ruta que copie el
-  audio a otro destino.
+  volumen multiplica las muestras por una ganancia y, si hay ecualizador, las pasa por
+  tres filtros en memoria. No hay ninguna ruta que copie el audio a otro destino.
 - **Aislamiento por app.** Cada control crea su propio tap + dispositivo agregado
   privado; tocar una app no altera el resto.
 - **Limpieza agresiva.** Si la app se cae o se cierra de forma inesperada, el siguiente
@@ -62,7 +63,7 @@ están en `StereoRender` y los `IOBlock` de `MuteEngine` / `AppVolumeTap`
   permiso TCC podría capturar el audio igual que SonicRouter; el control de quién tiene
   ese permiso lo gestiona macOS, no esta app.
 - **No persiste el audio en ningún momento.** Lo único que guarda en disco son tus
-  *preferencias* (volúmenes y rutas por app) en `UserDefaults` — nunca audio.
+  *preferencias* (volúmenes, rutas y ecualizador por app) en `UserDefaults` — nunca audio.
 - **Una máquina comprometida queda fuera de alcance.** SonicRouter asume que tu propio
   Mac es de confianza; malware local puede leer el audio antes de que SonicRouter lo vea.
 
@@ -73,8 +74,16 @@ están en `StereoRender` y los `IOBlock` de `MuteEngine` / `AppVolumeTap`
 - **Sin red.** No hay listeners, ni clientes HTTP, ni telemetría. No hay superficie de red.
 - **Dispositivos agregados privados.** Se crean con `kAudioAggregateDeviceIsPrivateKey`, así
   que no aparecen como salidas seleccionables para otras apps.
-- **Preferencias en `UserDefaults`.** Solo nombres de app, UID de dispositivo y volúmenes;
-  nada sensible.
+- **Preferencias en `UserDefaults`.** Solo nombres de app, UID de dispositivo, volúmenes y
+  ganancias del ecualizador; nada sensible.
+- **Archivos de exportación e importación.** El JSON exportado contiene solo esas mismas
+  preferencias. Al importar se comprueban el formato y la versión, se limitan el tamaño
+  (5 MB) y el número de entradas (1.000) y se acotan todos los valores; nada del archivo
+  se ejecuta.
+- **Atajos globales (opcionales).** Se registran con la API de hot keys de Carbon
+  (`RegisterEventHotKey`): macOS solo entrega a SonicRouter las dos combinaciones
+  registradas, nunca otras pulsaciones, así que no requieren permiso de accesibilidad ni de
+  monitorización de entrada. Están desactivados por defecto.
 - **Ítem de inicio de sesión (opcional).** «Abrir al iniciar sesión» usa la API oficial
   `SMAppService`, está desactivado por defecto y se revisa o revoca en *Ajustes del
   Sistema → General → Ítems de inicio*.

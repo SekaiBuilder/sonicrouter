@@ -5,10 +5,11 @@ Estado actual:
 - ✅ **Mute por app** (`MuteEngine`: tap `.mutedWhenTapped` + aggregate en marcha + IOProc) — funcional y verificado.
 - ✅ **Volumen por app** (`AppVolumeTap`: mismo montaje, IOProc re-emite con ganancia) — funcional y verificado.
 - ✅ **Routing de salida por app** mediante el mismo tap de re-emisión.
-- ✅ **Perfiles persistentes** que restauran volumen y salida cuando la app vuelve a reproducir audio.
+- ✅ **Perfiles persistentes** que restauran volumen, salida y ecualizador cuando la app vuelve a reproducir audio, exportables e importables como JSON.
 - ✅ Escaneo y agrupación de apps con audio activo.
 - ✅ Permiso de captura de audio (TCC) integrado.
-- ⬜ Ecualizador por app.
+- ✅ **Ecualizador por app** de tres bandas (`RealtimeEqualizer`): biquads RBJ calculados para la frecuencia de muestreo de la salida, preamplificación automática que compensa los realces y bypass exacto cuando es plano. Verificado con pruebas de respuesta en frecuencia y de procesado.
+- ✅ Silenciar todo, «silenciar las demás» y atajos globales opcionales.
 
 ## Arquitectura admitida
 
@@ -18,7 +19,8 @@ Los motores se crean bajo demanda y se destruyen al restaurar, pausar, dormir o 
 
 ## Próximas piezas
 
-- Añadir EQ por bandas con `AVAudioUnitEQ`.
+- Ecualizador con más bandas o curvas propias por salida.
+- Recalcular los filtros si la frecuencia de muestreo de la salida cambia con el motor en marcha (hoy se toma al crear el motor).
 - Añadir pruebas de integración sobre hardware de salida real y cambios de dispositivo.
 - Medir latencia, consumo y estabilidad en sesiones largas.
 

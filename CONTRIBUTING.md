@@ -43,9 +43,14 @@ swift build -Xswiftc -warnings-as-errors
 
 ## Disciplina de código
 
-- El **hot path de audio** (`StereoRender`, los `IOBlock`) corre en un hilo de tiempo
-  real: nada de asignaciones, locks ni llamadas a Objective-C/Swift runtime dentro del
-  IOProc. Lee la ganancia vía `GainBox` (lock-free) y trabaja sobre los buffers que te dan.
+- El **hot path de audio** (`StereoRender`, `RealtimeEqualizer`, los `IOBlock`) corre en
+  un hilo de tiempo real: nada de asignaciones, locks ni llamadas a Objective-C/Swift
+  runtime dentro del IOProc. Lee la ganancia vía `GainBox` y las bandas vía
+  `EqualizerParameters` (ambos atómicos), guarda el estado de los filtros en memoria
+  reservada de antemano y trabaja sobre los buffers que te dan.
+- La lógica pura (política de control, diseño y procesado del ecualizador, formato de
+  exportación) vive en `SonicRouterCore` para poder probarla sin Core Audio: añade ahí sus
+  pruebas en `Tests/SonicRouterPolicyTests`.
 - Toda lectura de propiedades de CoreAudio debe calcular el tamaño con
   `AudioObjectGetPropertyDataSize` antes de reservar, y las propiedades `CFString` siguen
   la *Create Rule* (`takeRetainedValue`).
