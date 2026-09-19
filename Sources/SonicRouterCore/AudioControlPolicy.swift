@@ -7,6 +7,9 @@ public struct AudioRouteProfile: Identifiable, Codable, Hashable, Sendable {
     public var bundleIdentifier: String?
     public var outputDeviceUID: String?
     public var volume: Double
+    /// `nil` means flat. Profiles saved before the equalizer existed have no
+    /// such key and decode as flat.
+    public var equalizer: AudioEqualizerSettings?
 
     public init(
         id: UUID = UUID(),
@@ -14,7 +17,8 @@ public struct AudioRouteProfile: Identifiable, Codable, Hashable, Sendable {
         appName: String,
         bundleIdentifier: String?,
         outputDeviceUID: String?,
-        volume: Double
+        volume: Double,
+        equalizer: AudioEqualizerSettings? = nil
     ) {
         self.id = id
         self.name = name
@@ -22,6 +26,7 @@ public struct AudioRouteProfile: Identifiable, Codable, Hashable, Sendable {
         self.bundleIdentifier = bundleIdentifier
         self.outputDeviceUID = outputDeviceUID
         self.volume = volume
+        self.equalizer = equalizer
     }
 }
 
@@ -29,23 +34,37 @@ public struct AudioControlIntent: Equatable, Sendable {
     public var volume: Double
     public var muted: Bool
     public var outputUID: String?
+    public var equalizer: AudioEqualizerSettings
 
-    public init(volume: Double, muted: Bool, outputUID: String? = nil) {
+    public init(
+        volume: Double,
+        muted: Bool,
+        outputUID: String? = nil,
+        equalizer: AudioEqualizerSettings = .flat
+    ) {
         self.volume = min(1, max(0, volume))
         self.muted = muted
         self.outputUID = outputUID
+        self.equalizer = equalizer
     }
 
     public init(profile: AudioRouteProfile) {
-        self.init(volume: profile.volume, muted: false, outputUID: profile.outputDeviceUID)
+        self.init(
+            volume: profile.volume,
+            muted: false,
+            outputUID: profile.outputDeviceUID,
+            equalizer: profile.equalizer ?? .flat
+        )
     }
 
     public var wantsMute: Bool {
         muted || volume <= 0.001
     }
 
+    /// The re-emit engine is needed to attenuate, to route to a specific
+    /// output, or to equalize; anything else keeps the native path.
     public var wantsVolumeEngine: Bool {
-        !wantsMute && (volume < 0.999 || outputUID != nil)
+        !wantsMute && (volume < 0.999 || outputUID != nil || !equalizer.isFlat)
     }
 
     public var requiresEngine: Bool {
