@@ -20,6 +20,11 @@ let package = Package(
             dependencies: ["SonicRouterCore"],
             path: "Sources/SonicRouter"
         ),
+        // Deliberately an executable rather than a `.testTarget`: SonicRouter
+        // builds with just the Command Line Tools, which ship neither XCTest nor
+        // the `Testing` module where SwiftPM looks for them (there is no
+        // platform path), so `swift test` cannot run there. `Scripts/test.sh`
+        // builds and runs this binary instead.
         .executableTarget(
             name: "SonicRouterPolicyTests",
             dependencies: ["SonicRouterCore"],

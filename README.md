@@ -21,17 +21,23 @@ Al cerrar la ventana, la app sigue viva en la barra de menús (arriba a la derec
 - **Mute real por app** usando *Process Taps* de Core Audio (`AudioHardwareCreateProcessTap`). El audio de la app se silencia a nivel de sistema sin cerrar ni pausar la app.
 - **Volumen por app**: sube o baja cada app de forma independiente (mezclador real), no solo silenciar.
 - **Routing por app**: envía cada aplicación a una salida concreta y restaura esa ruta cuando vuelve a reproducir audio.
-- **Perfiles persistentes** por bundle id (o por nombre cuando no existe): conservan volumen y salida entre ejecuciones.
+- **Ecualizador por app**: graves, medios y agudos (±12 dB) con preajustes como «Voz clara» o «Más graves». Al realzar una banda, el nivel general baja en la misma medida, así que el ecualizador nunca satura.
+- **Perfiles persistentes** por bundle id (o por nombre cuando no existe): conservan volumen, salida y ecualizador entre ejecuciones. Se pueden **exportar e importar** como JSON (Guardados → Exportar… / Importar…) para llevarlos a otro Mac.
 - Detecta y agrupa las apps que están reproduciendo audio (junta los procesos helper de Chrome, FaceTime, etc. en una sola fila).
 - **Barra de menú** con un panel rápido para silenciar/activar sin abrir la ventana, **+ ventana completa** con el mezclador, los dispositivos y los niveles guardados.
 - **Modo barra de menús**: al cerrar la ventana, la app desaparece del Dock pero sigue funcionando desde el icono de la barra de menús (arriba a la derecha). "Abrir ventana" desde ese panel restaura el Dock; "Salir" cierra del todo.
+- **Silenciar todo** con un clic o ⇧⌘M (y **Activar todo** con ⇧⌘U). En el menú contextual de cada fila, **«Silenciar las demás»** deja sonando solo esa app: ideal para una llamada.
 - **Restaurar todo**: botón de emergencia que quita todos los taps y devuelve el audio a la normalidad (también se ejecuta al cerrar la app).
 - **Consumo mínimo en segundo plano**: no hay bucle de sondeo. SonicRouter reacciona a eventos de Core Audio y del sistema, y cuando no hay ventana abierta ni nada controlado entra en modo **«En reposo»** soltando todas las escuchas. El modo de energía actual (Activo / En reposo / Suspendido) se ve en vivo en la barra de estado, el panel de la barra de menús y Ajustes.
 - Gestión de dispositivos CoreAudio: cambiar salida/entrada predeterminada y su volumen.
+- **Tres idiomas**: español, inglés y japonés. Sigue el idioma del sistema o se fija en Ajustes → Idioma; el diálogo de permiso de macOS también aparece traducido.
+- **Inicio a tu gusto**: «Abrir al iniciar sesión» (ítem de inicio oficial de macOS) e «Iniciar solo en la barra de menús», sin ventana ni icono en el Dock hasta que la pidas (Ajustes → Inicio).
+- **Atajos globales** (opcionales, Ajustes → Atajos): ⌃⌥⌘M silencia o reactiva la app en primer plano y ⌃⌥⇧⌘M silencia todo o lo deshace, aunque SonicRouter esté solo en la barra de menús. No piden permiso de accesibilidad.
+- **Atajos y estado a la vista**: los menús Ver y Audio reúnen ⌘1 Mezclador, ⌘2 Dispositivos, ⌘3 Guardados, ⌘R actualizar, ⇧⌘M/⇧⌘U y ⌘, Ajustes. La ventana recuerda la última sección abierta, la lista de guardados muestra el icono, la salida y el ecualizador de cada app, y el icono de la barra de menús pasa a un altavoz tachado mientras haya alguna app silenciada.
 
 ## Permiso necesario
 
-Los Process Taps requieren el permiso de **captura de audio del sistema** (TCC). La primera vez que silencias algo, macOS pedirá autorización. El `Info.plist` incluye `NSAudioCaptureUsageDescription`.
+Los Process Taps requieren el permiso de **captura de audio del sistema** (TCC). La primera vez que silencias algo, macOS pedirá autorización. El `Info.plist` incluye `NSAudioCaptureUsageDescription` (en español, inglés y japonés).
 
 > Importante: este permiso solo funciona ejecutando la app como `.app` (no con `swift run`). Si silenciar no hace nada, abre **Ajustes → Privacidad y seguridad → Grabación de audio / Micrófono**, activa SonicRouter y pulsa **Reintentar** en el banner.
 
@@ -41,8 +47,9 @@ macOS **no tiene una API pública de volumen por aplicación**, así que SonicRo
 
 - **Mute** (`MuteEngine`): el IOProc descarta el audio y emite silencio. Inmediato, sin latencia.
 - **Volumen** (`AppVolumeTap`): el mismo montaje, pero el IOProc copia el audio multiplicado por la ganancia.
+- **Ecualizador** (`RealtimeEqualizer`): en esa misma re-emisión, tres filtros biquad (estante de graves a 100 Hz, campana de medios a 1 kHz y estante de agudos a 8 kHz) calculados para la frecuencia de muestreo de la salida. Los cambios se deslizan en unos milisegundos y un ecualizador plano no toca las muestras.
 
-Al volver al 100% en la salida predeterminada, SonicRouter desmonta el tap y restaura de inmediato la ruta nativa de la app. Entre 1% y 99% usa una ruta de captura y re-emisión con ganancia **lineal**. La compensación recupera parte del nivel perdido usando solo el margen disponible en cada bloque; un limitador reduce la ganancia antes de que un pico pueda recortarse. Una salida elegida explícitamente mantiene el motor incluso al 100% porque sigue necesitando reenrutar el audio.
+Al volver al 100% en la salida predeterminada, SonicRouter desmonta el tap y restaura de inmediato la ruta nativa de la app. Entre 1% y 99% usa una ruta de captura y re-emisión con ganancia **lineal**. La compensación recupera parte del nivel perdido usando solo el margen disponible en cada bloque; un limitador reduce la ganancia antes de que un pico pueda recortarse. Una salida elegida explícitamente o un ecualizador activo mantienen el motor incluso al 100%, porque siguen necesitando procesar el audio.
 
 ### Versiones experimentales anteriores
 
@@ -87,7 +94,7 @@ El build es universal (Apple silicon + Intel) de forma predeterminada. Para una 
 
 Para desarrollo de UI sin audio real, `swift run` sigue funcionando (pero el mute no tendrá permiso).
 
-Las reglas puras de perfiles y control de audio se verifican con:
+Las reglas puras (control de audio, perfiles, diseño y procesado en tiempo real del ecualizador, formato de exportación) se verifican con:
 
 ```bash
 Scripts/test.sh

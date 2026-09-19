@@ -71,9 +71,9 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>1.4</string>
+  <string>1.5</string>
   <key>CFBundleVersion</key>
-  <string>6</string>
+  <string>7</string>
   <key>LSApplicationCategoryType</key>
   <string>public.app-category.utilities</string>
   <key>LSMinimumSystemVersion</key>
@@ -89,6 +89,17 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+
+# The system-audio-capture prompt shows this text in the user's language.
+write_info_plist_strings() {
+  local language="$1" text="$2"
+  mkdir -p "$RESOURCES_DIR/$language.lproj"
+  printf 'NSAudioCaptureUsageDescription = "%s";\n' "$text" \
+    > "$RESOURCES_DIR/$language.lproj/InfoPlist.strings"
+}
+write_info_plist_strings es "SonicRouter necesita capturar el audio del sistema para silenciar y ajustar el volumen de cada app por separado."
+write_info_plist_strings en "SonicRouter needs to capture system audio to mute and adjust the volume of each app separately."
+write_info_plist_strings ja "SonicRouterは各アプリの音量を個別にミュート・調整するためにシステム音声のキャプチャが必要です。"
 
 if command -v codesign >/dev/null 2>&1; then
   SIGN_IDENTITY="${CODE_SIGN_IDENTITY:--}"

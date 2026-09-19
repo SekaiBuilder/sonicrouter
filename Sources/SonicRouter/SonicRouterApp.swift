@@ -13,6 +13,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // "Start in the menu bar only": the main window scene is suppressed at
+        // launch (see `SonicRouterApp`), so leave the Dock right away as well.
+        if UserDefaults.standard.bool(forKey: StartupPreferences.startInMenuBarKey) {
+            NSApp.setActivationPolicy(.accessory)
+        }
+
         closeObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification,
             object: nil,
@@ -50,6 +56,7 @@ struct SonicRouterApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var audioStore = AudioDeviceStore()
     @StateObject private var appStore = ApplicationAudioStore()
+    @AppStorage(StartupPreferences.startInMenuBarKey) private var startInMenuBar = false
 
     var body: some Scene {
         Window("SonicRouter", id: "main") {
@@ -64,12 +71,22 @@ struct SonicRouterApp: App {
         }
         .defaultSize(width: 880, height: 640)
         .windowResizability(.contentMinSize)
+        // Read once at launch; changing the setting applies on the next launch.
+        .defaultLaunchBehavior(startInMenuBar ? .suppressed : .presented)
+        .commands {
+            SonicRouterCommands(appStore: appStore, audioStore: audioStore)
+        }
 
-        MenuBarExtra("SonicRouter", systemImage: "slider.vertical.3") {
+        MenuBarExtra {
             MenuBarView()
                 .environmentObject(audioStore)
                 .environmentObject(appStore)
                 .tint(Theme.accent)
+        } label: {
+            // The icon doubles as a status light: a crossed speaker while any
+            // app is muted, the mixer otherwise.
+            Image(systemName: menuBarSymbol)
+                .accessibilityLabel("SonicRouter")
         }
         .menuBarExtraStyle(.window)
 
@@ -80,5 +97,9 @@ struct SonicRouterApp: App {
                 .tint(Theme.accent)
                 .frame(width: 480)
         }
+    }
+
+    private var menuBarSymbol: String {
+        appStore.sessions.contains(where: \.isMuted) ? "speaker.slash.fill" : "slider.vertical.3"
     }
 }

@@ -190,6 +190,10 @@ private struct VolumeControl: View {
                     }
                 )
                 .onChange(of: draftValue) { _, newValue in
+                    // Skip the syncs from `onAppear` / `value` below: they would
+                    // otherwise write the device's current volume back to
+                    // CoreAudio (and surface any error) each time a card appears.
+                    guard let value, abs(newValue - value) > 0.001 else { return }
                     commit(newValue, delay: 0.08)
                 }
                 .onAppear {

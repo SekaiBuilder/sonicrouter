@@ -131,7 +131,7 @@ private extension CoreAudioClient {
             dataSize,
             &mutableDeviceID
         )
-        try throwIfNeeded(status, action: "cambiar el dispositivo predeterminado")
+        try throwIfNeeded(status, action: .setDefaultDevice)
     }
 
     static func streamCount(for deviceID: AudioObjectID, scope: AudioObjectPropertyScope) -> Int {
@@ -219,7 +219,7 @@ private extension CoreAudioClient {
         }
 
         if !didSetChannel {
-            throw AudioControlError.operationFailed("Este dispositivo no expone control de volumen por software.")
+            throw AudioControlError.volumeNotSettable
         }
     }
 
@@ -239,7 +239,7 @@ private extension CoreAudioClient {
         var mutableVolume = volume
         let dataSize = UInt32(MemoryLayout<Float32>.size)
         let status = AudioObjectSetPropertyData(deviceID, &propertyAddress, 0, nil, dataSize, &mutableVolume)
-        try throwIfNeeded(status, action: "cambiar volumen")
+        try throwIfNeeded(status, action: .setVolume)
         return true
     }
 
@@ -271,38 +271,65 @@ private extension CoreAudioClient {
         var mutableVolume = volume
         let dataSize = UInt32(MemoryLayout<Float32>.size)
         let status = AudioObjectSetPropertyData(deviceID, &propertyAddress, 0, nil, dataSize, &mutableVolume)
-        try throwIfNeeded(status, action: "cambiar volumen principal")
+        try throwIfNeeded(status, action: .setMainVolume)
         return true
     }
 
-    static func throwIfNeeded(_ status: OSStatus, action: String) throws {
+    static func throwIfNeeded(_ status: OSStatus, action: CoreAudioAction) throws {
         guard status != noErr else { return }
-        throw AudioControlError.operationFailed("No se pudo \(action). CoreAudio devolvió \(fourCharacterCode(status)).")
+        throw AudioControlError.coreAudio(action, status)
+    }
+}
+
+/// What a device operation was trying to do, so failures can be phrased in the
+/// user's language.
+enum CoreAudioAction {
+    case setDefaultDevice, setVolume, setMainVolume
+
+    var spanish: String {
+        switch self {
+        case .setDefaultDevice: "cambiar el dispositivo predeterminado"
+        case .setVolume: "cambiar el volumen"
+        case .setMainVolume: "cambiar el volumen principal"
+        }
     }
 
-    static func fourCharacterCode(_ status: OSStatus) -> String {
-        let unsigned = UInt32(bitPattern: status)
-        let chars = [
-            UInt8((unsigned >> 24) & 0xff),
-            UInt8((unsigned >> 16) & 0xff),
-            UInt8((unsigned >> 8) & 0xff),
-            UInt8(unsigned & 0xff)
-        ]
-
-        if chars.allSatisfy({ $0 >= 32 && $0 <= 126 }) {
-            return "'\(String(bytes: chars, encoding: .macOSRoman) ?? "\(status)")'"
+    var english: String {
+        switch self {
+        case .setDefaultDevice: "change the default device"
+        case .setVolume: "change the volume"
+        case .setMainVolume: "change the main volume"
         }
-        return "\(status)"
+    }
+
+    var japanese: String {
+        switch self {
+        case .setDefaultDevice: "デフォルトデバイスを変更"
+        case .setVolume: "音量を変更"
+        case .setMainVolume: "メイン音量を変更"
+        }
     }
 }
 
 enum AudioControlError: LocalizedError {
-    case operationFailed(String)
+    case coreAudio(CoreAudioAction, OSStatus)
+    case volumeNotSettable
 
     var errorDescription: String? {
         switch self {
-        case .operationFailed(let message):
-            return message
+        case let .coreAudio(action, status):
+            let code = FourCC.string(status)
+            return L10n.text(
+                "No se pudo \(action.spanish). CoreAudio devolvió \(code).",
+                "Could not \(action.english). CoreAudio returned \(code).",
+                "\(action.japanese)できませんでした。CoreAudioの応答: \(code)"
+            )
+        case .volumeNotSettable:
+            return L10n.text(
+                "Este dispositivo no expone control de volumen por software.",
+                "This device does not expose a software volume control.",
+                "このデバイスはソフトウェアからの音量調整に対応していません。"
+            )
         }
     }
 }

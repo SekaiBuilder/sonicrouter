@@ -10,12 +10,63 @@ private let tapLog = Logger(subsystem: "local.sonicrouter.app", category: "Proce
 // MARK: - Errors
 
 enum TapError: LocalizedError {
-    case coreAudio(String, OSStatus)
+    case coreAudio(TapAction, OSStatus)
 
     var errorDescription: String? {
         switch self {
         case let .coreAudio(action, status):
-            return "No se pudo \(action). CoreAudio devolvió \(FourCC.string(status))."
+            let code = FourCC.string(status)
+            return L10n.text(
+                "No se pudo \(action.spanish). CoreAudio devolvió \(code).",
+                "Could not \(action.english). CoreAudio returned \(code).",
+                "\(action.japanese)できませんでした。CoreAudioの応答: \(code)"
+            )
+        }
+    }
+}
+
+/// The activation step that failed, so the error can be phrased in the user's
+/// language instead of carrying a fixed Spanish string.
+enum TapAction {
+    case createMuteTap, createMuteDevice, prepareMute, startMute
+    case createVolumeTap, createVolumeDevice, prepareVolume, startVolume
+
+    var spanish: String {
+        switch self {
+        case .createMuteTap: "crear el tap de mute"
+        case .createMuteDevice: "crear el dispositivo de mute"
+        case .prepareMute: "preparar el mute"
+        case .startMute: "arrancar el mute"
+        case .createVolumeTap: "crear el tap de volumen"
+        case .createVolumeDevice: "crear el dispositivo de volumen"
+        case .prepareVolume: "preparar el volumen"
+        case .startVolume: "arrancar el volumen"
+        }
+    }
+
+    var english: String {
+        switch self {
+        case .createMuteTap: "create the mute tap"
+        case .createMuteDevice: "create the mute device"
+        case .prepareMute: "prepare the mute"
+        case .startMute: "start the mute"
+        case .createVolumeTap: "create the volume tap"
+        case .createVolumeDevice: "create the volume device"
+        case .prepareVolume: "prepare the volume control"
+        case .startVolume: "start the volume control"
+        }
+    }
+
+    var japanese: String {
+        switch self {
+        case .createMuteTap: "ミュート用タップを作成"
+        case .createMuteDevice: "ミュート用デバイスを作成"
+        case .prepareMute: "ミュートを準備"
+        case .startMute: "ミュートを開始"
+        case .createVolumeTap: "音量用タップを作成"
+        case .createVolumeDevice: "音量用デバイスを作成"
+        case .prepareVolume: "音量制御を準備"
+        case .startVolume: "音量制御を開始"
         }
     }
 }
@@ -222,16 +273,18 @@ enum AudioCapturePermission {
 
 // MARK: - Realtime stereo copy
 
-/// Copies an app's tapped audio into the output device buffers, scaled by gain.
-/// Handles interleaved and planar Float32 layouts so it works across output
-/// devices. The fast path (matching layouts) does a straight vDSP scale with no
-/// allocation; the fallback downmixes to L/R for mismatched layouts.
+/// Copies an app's tapped audio into the output device buffers, scaled by gain,
+/// then runs the app's equalizer over them in place. Handles interleaved and
+/// planar Float32 layouts so it works across output devices. The fast path
+/// (matching layouts) does a straight vDSP scale with no allocation; the
+/// fallback downmixes to L/R for mismatched layouts.
 enum StereoRender {
     static func copy(
         input: UnsafePointer<AudioBufferList>,
         output: UnsafeMutablePointer<AudioBufferList>,
         requestedGain: Float,
-        limiter: RealtimeGainLimiter
+        limiter: RealtimeGainLimiter,
+        equalizer: RealtimeEqualizer
     ) {
         let inList = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
         let outList = UnsafeMutableAudioBufferListPointer(output)
@@ -248,11 +301,33 @@ enum StereoRender {
         )
         guard gain > 0 else { return }
 
-        if fastCopy(inList: inList, outList: outList, gain: gain) {
-            return
+        if !fastCopy(inList: inList, outList: outList, gain: gain) {
+            copyStereoFallback(inList: inList, outList: outList, gain: gain)
         }
+        applyEqualizer(equalizer, to: outList)
+    }
 
-        copyStereoFallback(inList: inList, outList: outList, gain: gain)
+    /// Filters the rendered output in place. A flat, settled equalizer returns
+    /// straight away, so the default path stays a bit-exact scaled copy.
+    private static func applyEqualizer(
+        _ equalizer: RealtimeEqualizer,
+        to outList: UnsafeMutableAudioBufferListPointer
+    ) {
+        guard equalizer.beginCycle() else { return }
+        var firstChannel = 0
+        for buffer in outList {
+            let channels = max(1, Int(buffer.mNumberChannels))
+            if let data = buffer.mData {
+                let frames = Int(buffer.mDataByteSize) / (MemoryLayout<Float>.stride * channels)
+                equalizer.process(
+                    data.assumingMemoryBound(to: Float.self),
+                    frameCount: frames,
+                    channelCount: channels,
+                    firstChannel: firstChannel
+                )
+            }
+            firstChannel += channels
+        }
     }
 
     private static func peakMagnitude(_ list: UnsafeMutableAudioBufferListPointer) -> Float {
@@ -410,7 +485,7 @@ private enum TapAggregate {
         setNominalSampleRate(rate, on: aggregateID)
     }
 
-    private static func nominalSampleRate(_ deviceID: AudioObjectID) -> Float64? {
+    static func nominalSampleRate(_ deviceID: AudioObjectID) -> Float64? {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyNominalSampleRate,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -469,7 +544,7 @@ final class MuteEngine {
         var newTap = AudioObjectID(kAudioObjectUnknown)
         let tapStatus = AudioHardwareCreateProcessTap(description, &newTap)
         guard tapStatus == noErr, newTap != kAudioObjectUnknown else {
-            throw TapError.coreAudio("crear el tap de mute", tapStatus)
+            throw TapError.coreAudio(.createMuteTap, tapStatus)
         }
         tapID = newTap
 
@@ -484,7 +559,7 @@ final class MuteEngine {
         let aggStatus = AudioHardwareCreateAggregateDevice(composition, &newAggregate)
         guard aggStatus == noErr, newAggregate != kAudioObjectUnknown else {
             invalidate()
-            throw TapError.coreAudio("crear el dispositivo de mute", aggStatus)
+            throw TapError.coreAudio(.createMuteDevice, aggStatus)
         }
         aggregateID = newAggregate
         TapAggregate.matchSampleRate(aggregateID: aggregateID, to: outputDeviceID)
@@ -500,14 +575,14 @@ final class MuteEngine {
         let procStatus = AudioDeviceCreateIOProcIDWithBlock(&newProcID, aggregateID, nil, ioBlock)
         guard procStatus == noErr, let newProcID else {
             invalidate()
-            throw TapError.coreAudio("preparar el mute", procStatus)
+            throw TapError.coreAudio(.prepareMute, procStatus)
         }
         ioProcID = newProcID
 
         let startStatus = AudioDeviceStart(aggregateID, newProcID)
         guard startStatus == noErr else {
             invalidate()
-            throw TapError.coreAudio("arrancar el mute", startStatus)
+            throw TapError.coreAudio(.startMute, startStatus)
         }
         self.outputUID = outputUID
         self.outputDeviceID = outputDeviceID
@@ -535,13 +610,15 @@ final class MuteEngine {
 
 // MARK: - Volume engine
 
-/// Per-app volume. The original process path is fully muted, leaving exactly one
-/// audible copy: the signal re-emitted here. Drift compensation stays enabled
-/// because the tap clock is not guaranteed to match the output clock.
+/// Per-app volume, route and equalizer. The original process path is fully
+/// muted, leaving exactly one audible copy: the signal re-emitted here. Drift
+/// compensation stays enabled because the tap clock is not guaranteed to match
+/// the output clock.
 final class AppVolumeTap {
     let pid: pid_t
     let processObjectIDs: [AudioObjectID]
     let gainBox: GainBox
+    let equalizerParameters: EqualizerParameters
     private(set) var outputUID: String
     let outputDeviceID: AudioObjectID
 
@@ -554,12 +631,14 @@ final class AppVolumeTap {
         processObjectIDs: [AudioObjectID],
         gain: Float,
         makeup: Float,
+        equalizer: AudioEqualizerSettings,
         outputUID: String,
         outputDeviceID: AudioObjectID
     ) {
         self.pid = pid
         self.processObjectIDs = processObjectIDs
         self.gainBox = GainBox(max(0, min(1, gain)), makeup: max(0.5, min(8, makeup)))
+        self.equalizerParameters = EqualizerParameters(equalizer)
         self.outputUID = outputUID
         self.outputDeviceID = outputDeviceID
     }
@@ -576,6 +655,12 @@ final class AppVolumeTap {
         set { gainBox.makeup = max(0.5, min(8, newValue)) }
     }
 
+    /// Live-adjustable: the render thread glides to the new gains.
+    var equalizer: AudioEqualizerSettings {
+        get { equalizerParameters.settings }
+        set { equalizerParameters.settings = newValue }
+    }
+
     func activate() throws {
         let uuid = UUID()
         let description = CATapDescription(stereoMixdownOfProcesses: processObjectIDs)
@@ -589,7 +674,7 @@ final class AppVolumeTap {
         var newTap = AudioObjectID(kAudioObjectUnknown)
         let tapStatus = AudioHardwareCreateProcessTap(description, &newTap)
         guard tapStatus == noErr, newTap != kAudioObjectUnknown else {
-            throw TapError.coreAudio("crear el tap de volumen", tapStatus)
+            throw TapError.coreAudio(.createVolumeTap, tapStatus)
         }
         tapID = newTap
 
@@ -605,19 +690,25 @@ final class AppVolumeTap {
         let aggStatus = AudioHardwareCreateAggregateDevice(composition, &newAggregate)
         guard aggStatus == noErr, newAggregate != kAudioObjectUnknown else {
             invalidate()
-            throw TapError.coreAudio("crear el dispositivo de volumen", aggStatus)
+            throw TapError.coreAudio(.createVolumeDevice, aggStatus)
         }
         aggregateID = newAggregate
         TapAggregate.matchSampleRate(aggregateID: aggregateID, to: outputDeviceID)
+        // The equalizer's filters are designed for the rate the IOProc runs at.
+        let sampleRate = TapAggregate.nominalSampleRate(aggregateID)
+            ?? TapAggregate.nominalSampleRate(outputDeviceID)
+            ?? 48_000
 
         let box = gainBox
         let limiter = RealtimeGainLimiter(initialGain: box.gain * box.makeup)
+        let equalizer = RealtimeEqualizer(parameters: equalizerParameters, sampleRate: sampleRate)
         let ioBlock: AudioDeviceIOBlock = { _, inputData, _, outputData, _ in
             StereoRender.copy(
                 input: inputData,
                 output: outputData,
                 requestedGain: box.gain * box.makeup,
-                limiter: limiter
+                limiter: limiter,
+                equalizer: equalizer
             )
         }
 
@@ -625,16 +716,16 @@ final class AppVolumeTap {
         let procStatus = AudioDeviceCreateIOProcIDWithBlock(&newProcID, aggregateID, nil, ioBlock)
         guard procStatus == noErr, let newProcID else {
             invalidate()
-            throw TapError.coreAudio("preparar el volumen", procStatus)
+            throw TapError.coreAudio(.prepareVolume, procStatus)
         }
         ioProcID = newProcID
 
         let startStatus = AudioDeviceStart(aggregateID, newProcID)
         guard startStatus == noErr else {
             invalidate()
-            throw TapError.coreAudio("arrancar el volumen", startStatus)
+            throw TapError.coreAudio(.startVolume, startStatus)
         }
-        tapLog.debug("Volume engine active for pid \(self.pid) at gain \(self.gain)")
+        tapLog.debug("Volume engine active for pid \(self.pid) at gain \(self.gain), \(sampleRate) Hz")
         logStreamFormats()
     }
 

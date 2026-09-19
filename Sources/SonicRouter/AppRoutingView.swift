@@ -14,7 +14,7 @@ struct AppRoutingView: View {
     /// list stays put when you mute something (no rows jumping under the cursor).
     private var active: [AppAudioSession] {
         appStore.sessions
-            .filter { $0.isProducingAudio || $0.isMuted || $0.isVolumeEngaged || $0.desiredVolume < 0.999 || $0.desiredOutputUID != nil }
+            .filter(\.isShownInMixer)
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
@@ -68,7 +68,10 @@ struct AppRoutingView: View {
                             onCommit: { appStore.commitVolume(for: session) },
                             onReset: { appStore.reset(session) },
                             outputDevices: routableOutputs,
-                            onSelectOutput: { appStore.setOutputDevice($0, for: session) }
+                            onSelectOutput: { appStore.setOutputDevice($0, for: session) },
+                            onMuteOthers: { appStore.muteOthers(than: session) },
+                            onEqualizer: { appStore.setEqualizer($0, for: session) },
+                            onCommitEqualizer: { appStore.commitEqualizer(for: session) }
                         )
                         if index < sessions.count - 1 {
                             Divider().padding(.leading, 50)
@@ -92,6 +95,11 @@ private struct MixerHeader: View {
     @ObservedObject private var l10n = L10n.shared
     let onRestore: () -> Void
 
+    /// Unmuting is the only bulk action left: nothing audible to mute.
+    private var offersUnmute: Bool {
+        !appStore.canMuteAll && appStore.canUnmuteAll
+    }
+
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 5) {
@@ -108,6 +116,22 @@ private struct MixerHeader: View {
             }
 
             Spacer(minLength: 12)
+
+            Button {
+                appStore.toggleMuteAll()
+            } label: {
+                Label(
+                    offersUnmute
+                        ? l10n.t("Activar todo", "Unmute all", "すべて解除")
+                        : l10n.t("Silenciar todo", "Mute all", "すべてミュート"),
+                    systemImage: offersUnmute ? "speaker.wave.2" : "speaker.slash"
+                )
+            }
+            .buttonStyle(.bordered)
+            .disabled(!appStore.canMuteAll && !appStore.canUnmuteAll)
+            .help(offersUnmute
+                ? l10n.t("Activar todas las apps silenciadas (⇧⌘U)", "Unmute every muted app (⇧⌘U)", "ミュート中のすべてのアプリを解除 (⇧⌘U)")
+                : l10n.t("Silenciar todas las apps que suenan (⇧⌘M)", "Mute every app that is playing (⇧⌘M)", "再生中のすべてのアプリをミュート (⇧⌘M)"))
 
             Button(action: onRestore) {
                 Label(l10n.t("Restaurar todo", "Restore all", "すべて復元"), systemImage: "arrow.uturn.backward.circle")

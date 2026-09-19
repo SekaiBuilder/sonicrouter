@@ -8,8 +8,10 @@ struct ContentView: View {
 
     @EnvironmentObject private var audioStore: AudioDeviceStore
     @EnvironmentObject private var appStore: ApplicationAudioStore
+    @Environment(\.openSettings) private var openSettings
     @ObservedObject private var l10n = L10n.shared
-    @State private var selection: Screen = .mixer
+    /// Remembered across launches so the window reopens where you left it.
+    @AppStorage(Screen.storageKey) private var selection: Screen = .mixer
 
     var body: some View {
         HStack(spacing: 0) {
@@ -18,6 +20,11 @@ struct ContentView: View {
             detail
         }
         .onAppear {
+            // However the window came back (menu bar, Finder, a menu command),
+            // a visible window always gets its Dock icon.
+            if NSApp.activationPolicy() != .regular {
+                AppDelegate.showInDock()
+            }
             audioStore.setInterfaceVisible(.mainWindow, true)
             appStore.setInterfaceVisible(.mainWindow, true)
         }
@@ -51,6 +58,7 @@ struct ContentView: View {
                 SidebarButton(
                     title: screen.title(l10n),
                     symbol: screen.symbol,
+                    shortcut: screen.shortcut,
                     isSelected: selection == screen
                 ) {
                     selection = screen
@@ -70,7 +78,20 @@ struct ContentView: View {
             .buttonStyle(.borderless)
             .foregroundStyle(.secondary)
             .padding(.horizontal, 8)
+            .help(l10n.t("Volver a leer apps y dispositivos (⌘R)", "Re-read apps and devices (⌘R)", "アプリとデバイスを再読込 (⌘R)"))
+
+            Button {
+                openSettings()
+            } label: {
+                Label(l10n.t("Ajustes", "Settings", "設定"), systemImage: "gearshape")
+                    .font(.callout)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
             .padding(.bottom, 4)
+            .help(l10n.t("Idioma, inicio y permisos (⌘,)", "Language, startup and permissions (⌘,)", "言語・起動・権限 (⌘,)"))
         }
         .padding(12)
         .frame(width: 196)
@@ -105,6 +126,7 @@ struct ContentView: View {
 private struct SidebarButton: View {
     let title: String
     let symbol: String
+    let shortcut: KeyEquivalent
     let isSelected: Bool
     let action: () -> Void
 
@@ -133,10 +155,15 @@ private struct SidebarButton: View {
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
         .animation(.easeOut(duration: 0.13), value: isHovered)
+        .help("⌘" + String(shortcut.character))
     }
 }
 
-private enum Screen: String, CaseIterable, Identifiable {
+/// Main-window sections. The View menu commands and the sidebar share the
+/// selection through `storageKey`.
+enum Screen: String, CaseIterable, Identifiable {
+    static let storageKey = "SonicRouter.LastScreen"
+
     case mixer
     case devices
     case saved
@@ -159,11 +186,23 @@ private enum Screen: String, CaseIterable, Identifiable {
         case .saved: "bookmark"
         }
     }
+
+    /// ⌘1 / ⌘2 / ⌘3, in sidebar order.
+    var shortcut: KeyEquivalent {
+        switch self {
+        case .mixer: "1"
+        case .devices: "2"
+        case .saved: "3"
+        }
+    }
 }
 
 private struct StatusBar: View {
     @EnvironmentObject private var audioStore: AudioDeviceStore
     @EnvironmentObject private var appStore: ApplicationAudioStore
+    @ObservedObject private var l10n = L10n.shared
+    /// Whichever store reported last: app controls or device actions.
+    @State private var message = ""
 
     var body: some View {
         HStack(spacing: 8) {
@@ -189,11 +228,15 @@ private struct StatusBar: View {
         .padding(.vertical, 9)
         .background(.bar)
         .overlay(alignment: .top) { Divider().opacity(0.6) }
+        .onChange(of: appStore.controlStatus, initial: true) { _, status in message = status }
+        .onChange(of: audioStore.statusMessage) { _, status in message = status }
+        // A message in the previous language would linger; fall back to idle.
+        .onChange(of: l10n.language) { message = "" }
     }
 
     private var statusText: String {
         if let error = audioStore.lastError { return error }
-        return appStore.controlStatus
+        return message.isEmpty ? l10n.t("Listo", "Ready", "準備完了") : message
     }
 
     private var statusSymbol: String {

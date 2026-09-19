@@ -5,7 +5,8 @@ import CoreAudio
 final class AudioDeviceStore: ObservableObject {
     @Published private(set) var devices: [AudioDevice] = []
     @Published var selectedDeviceID: AudioObjectID?
-    @Published var statusMessage = "Listo"
+    /// Latest device action result; empty means idle (see `StatusBar`).
+    @Published var statusMessage = ""
     @Published var lastError: String?
 
     private struct SystemListener {
@@ -64,7 +65,7 @@ final class AudioDeviceStore: ObservableObject {
             selectedDeviceID = devices.first(where: \.isDefaultOutput)?.id ?? devices.first?.id
         }
         if !quietly {
-            statusMessage = "Dispositivos actualizados"
+            statusMessage = L10n.shared.t("Dispositivos actualizados", "Devices refreshed", "デバイスを更新しました")
         }
     }
 
@@ -73,26 +74,28 @@ final class AudioDeviceStore: ObservableObject {
     }
 
     func makeDefaultOutput(_ device: AudioDevice) {
-        run("Salida activa: \(device.name)") {
+        run(L10n.shared.t("Salida activa: \(device.name)", "Active output: \(device.name)", "出力: \(device.name)")) {
             try CoreAudioClient.setDefaultOutput(device.id)
         }
     }
 
     func makeDefaultInput(_ device: AudioDevice) {
-        run("Entrada activa: \(device.name)") {
+        run(L10n.shared.t("Entrada activa: \(device.name)", "Active input: \(device.name)", "入力: \(device.name)")) {
             try CoreAudioClient.setDefaultInput(device.id)
         }
     }
 
     func setOutputVolume(_ volume: Double, for device: AudioDevice) {
-        runWithoutRefresh("Volumen de salida: \(Int(volume * 100))%") {
+        let percent = Int((volume * 100).rounded())
+        runWithoutRefresh(L10n.shared.t("Volumen de salida: \(percent)%", "Output volume: \(percent)%", "出力音量: \(percent)%")) {
             try CoreAudioClient.setOutputVolume(volume, for: device.id)
             updateVolume(volume, for: device.id, output: true)
         }
     }
 
     func setInputVolume(_ volume: Double, for device: AudioDevice) {
-        runWithoutRefresh("Volumen de entrada: \(Int(volume * 100))%") {
+        let percent = Int((volume * 100).rounded())
+        runWithoutRefresh(L10n.shared.t("Volumen de entrada: \(percent)%", "Input volume: \(percent)%", "入力音量: \(percent)%")) {
             try CoreAudioClient.setInputVolume(volume, for: device.id)
             updateVolume(volume, for: device.id, output: false)
         }
@@ -106,7 +109,7 @@ final class AudioDeviceStore: ObservableObject {
             statusMessage = successMessage
         } catch {
             lastError = error.localizedDescription
-            statusMessage = "Hubo un problema"
+            statusMessage = L10n.shared.t("Hubo un problema", "Something went wrong", "問題が発生しました")
         }
     }
 
@@ -117,7 +120,7 @@ final class AudioDeviceStore: ObservableObject {
             statusMessage = successMessage
         } catch {
             lastError = error.localizedDescription
-            statusMessage = "Hubo un problema"
+            statusMessage = L10n.shared.t("Hubo un problema", "Something went wrong", "問題が発生しました")
         }
     }
 
