@@ -7,6 +7,13 @@ typealias AudioControlIntent = SonicRouterCore.AudioControlIntent
 typealias AudioProfileMatcher = SonicRouterCore.AudioProfileMatcher
 typealias AudioGainPolicy = SonicRouterCore.AudioGainPolicy
 typealias SonicRouterAudioIdentifiers = SonicRouterCore.SonicRouterAudioIdentifiers
+typealias AudioEqualizerSettings = SonicRouterCore.AudioEqualizerSettings
+typealias EqualizerBand = SonicRouterCore.EqualizerBand
+typealias EqualizerParameters = SonicRouterCore.EqualizerParameters
+typealias RealtimeEqualizer = SonicRouterCore.RealtimeEqualizer
+typealias AudioProfileArchive = SonicRouterCore.AudioProfileArchive
+typealias AudioProfileArchiveError = SonicRouterCore.AudioProfileArchiveError
+typealias AudioProfileMerge = SonicRouterCore.AudioProfileMerge
 
 /// UserDefaults keys shared by Settings and the app delegate.
 enum StartupPreferences {
@@ -71,10 +78,24 @@ struct AppAudioSession: Identifiable, Hashable {
     var outputDeviceNames: [String]
     var desiredVolume: Double
     var desiredOutputUID: String?
+    var equalizer: AudioEqualizerSettings
     var isControllable: Bool
     var supportsVolumeControl: Bool
     /// True while the re-emit volume engine owns this app's audio path.
     var isVolumeEngaged: Bool
+}
+
+extension AppAudioSession {
+    /// Anything the user changed from normal playback: mute, level, route or EQ.
+    var hasCustomSettings: Bool {
+        isMuted || isVolumeEngaged || desiredVolume < 0.999 || desiredOutputUID != nil || !equalizer.isFlat
+    }
+
+    /// Mixer rows: apps playing now plus any app carrying custom settings, so
+    /// a muted or adjusted app never disappears from under the cursor.
+    var isShownInMixer: Bool {
+        isProducingAudio || hasCustomSettings
+    }
 }
 
 struct CoreAudioProcessInfo: Hashable {

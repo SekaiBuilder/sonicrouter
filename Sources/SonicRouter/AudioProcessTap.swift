@@ -273,16 +273,18 @@ enum AudioCapturePermission {
 
 // MARK: - Realtime stereo copy
 
-/// Copies an app's tapped audio into the output device buffers, scaled by gain.
-/// Handles interleaved and planar Float32 layouts so it works across output
-/// devices. The fast path (matching layouts) does a straight vDSP scale with no
-/// allocation; the fallback downmixes to L/R for mismatched layouts.
+/// Copies an app's tapped audio into the output device buffers, scaled by gain,
+/// then runs the app's equalizer over them in place. Handles interleaved and
+/// planar Float32 layouts so it works across output devices. The fast path
+/// (matching layouts) does a straight vDSP scale with no allocation; the
+/// fallback downmixes to L/R for mismatched layouts.
 enum StereoRender {
     static func copy(
         input: UnsafePointer<AudioBufferList>,
         output: UnsafeMutablePointer<AudioBufferList>,
         requestedGain: Float,
-        limiter: RealtimeGainLimiter
+        limiter: RealtimeGainLimiter,
+        equalizer: RealtimeEqualizer
     ) {
         let inList = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
         let outList = UnsafeMutableAudioBufferListPointer(output)
@@ -299,11 +301,33 @@ enum StereoRender {
         )
         guard gain > 0 else { return }
 
-        if fastCopy(inList: inList, outList: outList, gain: gain) {
-            return
+        if !fastCopy(inList: inList, outList: outList, gain: gain) {
+            copyStereoFallback(inList: inList, outList: outList, gain: gain)
         }
+        applyEqualizer(equalizer, to: outList)
+    }
 
-        copyStereoFallback(inList: inList, outList: outList, gain: gain)
+    /// Filters the rendered output in place. A flat, settled equalizer returns
+    /// straight away, so the default path stays a bit-exact scaled copy.
+    private static func applyEqualizer(
+        _ equalizer: RealtimeEqualizer,
+        to outList: UnsafeMutableAudioBufferListPointer
+    ) {
+        guard equalizer.beginCycle() else { return }
+        var firstChannel = 0
+        for buffer in outList {
+            let channels = max(1, Int(buffer.mNumberChannels))
+            if let data = buffer.mData {
+                let frames = Int(buffer.mDataByteSize) / (MemoryLayout<Float>.stride * channels)
+                equalizer.process(
+                    data.assumingMemoryBound(to: Float.self),
+                    frameCount: frames,
+                    channelCount: channels,
+                    firstChannel: firstChannel
+                )
+            }
+            firstChannel += channels
+        }
     }
 
     private static func peakMagnitude(_ list: UnsafeMutableAudioBufferListPointer) -> Float {
@@ -461,7 +485,7 @@ private enum TapAggregate {
         setNominalSampleRate(rate, on: aggregateID)
     }
 
-    private static func nominalSampleRate(_ deviceID: AudioObjectID) -> Float64? {
+    static func nominalSampleRate(_ deviceID: AudioObjectID) -> Float64? {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyNominalSampleRate,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -586,13 +610,15 @@ final class MuteEngine {
 
 // MARK: - Volume engine
 
-/// Per-app volume. The original process path is fully muted, leaving exactly one
-/// audible copy: the signal re-emitted here. Drift compensation stays enabled
-/// because the tap clock is not guaranteed to match the output clock.
+/// Per-app volume, route and equalizer. The original process path is fully
+/// muted, leaving exactly one audible copy: the signal re-emitted here. Drift
+/// compensation stays enabled because the tap clock is not guaranteed to match
+/// the output clock.
 final class AppVolumeTap {
     let pid: pid_t
     let processObjectIDs: [AudioObjectID]
     let gainBox: GainBox
+    let equalizerParameters: EqualizerParameters
     private(set) var outputUID: String
     let outputDeviceID: AudioObjectID
 
@@ -605,12 +631,14 @@ final class AppVolumeTap {
         processObjectIDs: [AudioObjectID],
         gain: Float,
         makeup: Float,
+        equalizer: AudioEqualizerSettings,
         outputUID: String,
         outputDeviceID: AudioObjectID
     ) {
         self.pid = pid
         self.processObjectIDs = processObjectIDs
         self.gainBox = GainBox(max(0, min(1, gain)), makeup: max(0.5, min(8, makeup)))
+        self.equalizerParameters = EqualizerParameters(equalizer)
         self.outputUID = outputUID
         self.outputDeviceID = outputDeviceID
     }
@@ -625,6 +653,12 @@ final class AppVolumeTap {
     var makeup: Float {
         get { gainBox.makeup }
         set { gainBox.makeup = max(0.5, min(8, newValue)) }
+    }
+
+    /// Live-adjustable: the render thread glides to the new gains.
+    var equalizer: AudioEqualizerSettings {
+        get { equalizerParameters.settings }
+        set { equalizerParameters.settings = newValue }
     }
 
     func activate() throws {
@@ -660,15 +694,21 @@ final class AppVolumeTap {
         }
         aggregateID = newAggregate
         TapAggregate.matchSampleRate(aggregateID: aggregateID, to: outputDeviceID)
+        // The equalizer's filters are designed for the rate the IOProc runs at.
+        let sampleRate = TapAggregate.nominalSampleRate(aggregateID)
+            ?? TapAggregate.nominalSampleRate(outputDeviceID)
+            ?? 48_000
 
         let box = gainBox
         let limiter = RealtimeGainLimiter(initialGain: box.gain * box.makeup)
+        let equalizer = RealtimeEqualizer(parameters: equalizerParameters, sampleRate: sampleRate)
         let ioBlock: AudioDeviceIOBlock = { _, inputData, _, outputData, _ in
             StereoRender.copy(
                 input: inputData,
                 output: outputData,
                 requestedGain: box.gain * box.makeup,
-                limiter: limiter
+                limiter: limiter,
+                equalizer: equalizer
             )
         }
 
@@ -685,7 +725,7 @@ final class AppVolumeTap {
             invalidate()
             throw TapError.coreAudio(.startVolume, startStatus)
         }
-        tapLog.debug("Volume engine active for pid \(self.pid) at gain \(self.gain)")
+        tapLog.debug("Volume engine active for pid \(self.pid) at gain \(self.gain), \(sampleRate) Hz")
         logStreamFormats()
     }
 

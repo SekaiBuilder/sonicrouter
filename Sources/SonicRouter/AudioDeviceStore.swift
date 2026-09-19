@@ -5,7 +5,8 @@ import CoreAudio
 final class AudioDeviceStore: ObservableObject {
     @Published private(set) var devices: [AudioDevice] = []
     @Published var selectedDeviceID: AudioObjectID?
-    @Published var statusMessage = L10n.shared.t("Listo", "Ready", "準備完了")
+    /// Latest device action result; empty means idle (see `StatusBar`).
+    @Published var statusMessage = ""
     @Published var lastError: String?
 
     private struct SystemListener {

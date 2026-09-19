@@ -14,7 +14,9 @@ final class ApplicationAudioStore: ObservableObject {
     @Published var profiles: [AudioRouteProfile] = []
     @Published private(set) var activeAudioCount = 0
     @Published private(set) var scannerStatus = L10n.shared.t("Buscando audio…", "Scanning for audio…", "音声を検索中…")
-    @Published var controlStatus = L10n.shared.t("Listo", "Ready", "準備完了")
+    /// Latest result of a user action. Empty means idle; the status bar then
+    /// shows "Ready" in the current language.
+    @Published var controlStatus = ""
     @Published private(set) var permission: AudioPermission = .unknown
     /// Coarse, live view of how much work the app is doing. Drives the activity
     /// indicator in the UI and reflects the battery optimizations in real time.
@@ -94,6 +96,10 @@ final class ApplicationAudioStore: ObservableObject {
         }
         installTerminationObserver()
         installSleepWakeObservers()
+        GlobalHotKeys.shared.handler = { [weak self] action in
+            self?.handleGlobalShortcut(action)
+        }
+        GlobalHotKeys.shared.applySavedPreference()
     }
 
     deinit {
@@ -140,6 +146,19 @@ final class ApplicationAudioStore: ObservableObject {
         control.outputUID == nil ? effectiveOutput : routedOutput(for: control)
     }
 
+    /// Muting emits no audio, so when an explicit route is missing the mute
+    /// engine borrows the default output's clock instead of failing: mute
+    /// must work for every app, including one routed to a device that left.
+    private func muteOutput(for control: Control) -> (uid: String, id: AudioObjectID)? {
+        targetOutput(for: control) ?? effectiveOutput
+    }
+
+    /// A new intent seeded from what the row shows, so changing one setting
+    /// never silently drops another (such as a restored equalizer).
+    private func newControl(for session: AppAudioSession) -> Control {
+        Control(volume: session.desiredVolume, muted: session.isMuted, equalizer: session.equalizer)
+    }
+
     /// Selecting the device that is already the system default must not force a
     /// capture/re-emit route. Treat it as the native/default path instead.
     private func normalizedOutputUID(_ uid: String?) -> String? {
@@ -153,16 +172,16 @@ final class ApplicationAudioStore: ObservableObject {
         defer { updateObservationState() }
         let normalizedUID = normalizedOutputUID(uid)
         let previous = controls[session.id]
-        var control = previous ?? Control(volume: session.desiredVolume, muted: false)
+        var control = previous ?? newControl(for: session)
         control.outputUID = normalizedUID
         controls[session.id] = control
 
-        // Nothing left to do: default output, full volume, not muted.
-        if normalizedUID == nil, !control.muted, control.volume >= 0.999 {
+        // Nothing left to do: default output, full volume, flat EQ, not muted.
+        if normalizedUID == nil, !control.requiresEngine {
             tearDownVolume(session.id)
             controls[session.id] = nil
             mutateSession(session.id) { $0.desiredOutputUID = nil }
-            saveProfile(for: session, outputDeviceUID: nil, volume: control.volume, shouldRefresh: false)
+            saveProfile(for: session, outputDeviceUID: nil, volume: control.volume, equalizer: control.equalizer)
             controlStatus = L10n.shared.t("\(session.name): salida predeterminada", "\(session.name): default output", "\(session.name)：既定の出力")
             return
         }
@@ -174,7 +193,7 @@ final class ApplicationAudioStore: ObservableObject {
             }
         }
         mutateSession(session.id) { $0.desiredOutputUID = normalizedUID }
-        saveProfile(for: session, outputDeviceUID: normalizedUID, volume: control.volume, shouldRefresh: false)
+        saveProfile(for: session, outputDeviceUID: normalizedUID, volume: control.volume, equalizer: control.equalizer)
     }
 
     // MARK: - Permission
@@ -320,7 +339,7 @@ final class ApplicationAudioStore: ObservableObject {
         }
 
         let previous = controls[key]
-        var control = previous ?? Control(volume: session.desiredVolume, muted: false)
+        var control = previous ?? newControl(for: session)
         control.muted = muted
         controls[key] = control
 
@@ -342,7 +361,7 @@ final class ApplicationAudioStore: ObservableObject {
         defer { updateObservationState() }
         let clamped = min(1, max(0, volume))
         let previous = controls[session.id]
-        var control = previous ?? Control(volume: clamped, muted: false)
+        var control = previous ?? newControl(for: session)
         control.volume = clamped
         control.outputUID = normalizedOutputUID(control.outputUID)
         controls[session.id] = control
@@ -368,21 +387,65 @@ final class ApplicationAudioStore: ObservableObject {
     }
 
     func commitVolume(for session: AppAudioSession) {
-        let liveSession = sessions.first(where: { $0.id == session.id }) ?? session
-        let volume = controls[session.id]?.volume ?? liveSession.desiredVolume
-        persistVolume(volume, for: liveSession)
+        persistSettings(for: session)
     }
 
-    /// Restores an app to normal, untouched playback.
+    /// Live equalizer update while dragging; `commitEqualizer(for:)` persists.
+    func setEqualizer(_ settings: AudioEqualizerSettings, for session: AppAudioSession) {
+        defer { updateObservationState() }
+        let previous = controls[session.id]
+        var control = previous ?? newControl(for: session)
+        control.equalizer = settings
+        control.outputUID = normalizedOutputUID(control.outputUID)
+        controls[session.id] = control
+
+        guard session.supportsVolumeControl, !controlProcessIDs(for: session).isEmpty else {
+            controls[session.id] = previous
+            controlStatus = L10n.shared.t(
+                "\(session.name) aún no tiene audio activo para controlar.",
+                "\(session.name) does not have active audio to control yet.",
+                "\(session.name)にはまだ制御できる音声がありません。"
+            )
+            return
+        }
+
+        guard apply(session: session, control: control) else {
+            controls[session.id] = previous
+            return
+        }
+        mutateSession(session.id) { $0.equalizer = settings }
+        if !control.wantsMute {
+            controlStatus = settings.isFlat
+                ? L10n.shared.t(
+                    "\(session.name): ecualizador plano",
+                    "\(session.name): flat equalizer",
+                    "\(session.name)：イコライザーをフラットに"
+                )
+                : L10n.shared.t(
+                    "\(session.name): ecualizador ajustado",
+                    "\(session.name): equalizer adjusted",
+                    "\(session.name)：イコライザーを調整"
+                )
+        }
+    }
+
+    func commitEqualizer(for session: AppAudioSession) {
+        persistSettings(for: session)
+    }
+
+    /// Restores an app to normal, untouched playback: full volume, default
+    /// output, flat equalizer.
     func reset(_ session: AppAudioSession) {
         defer { updateObservationState() }
         controls[session.id] = nil
         tearDownAll(session.id)
-        saveProfile(for: session, outputDeviceUID: nil, volume: 1, shouldRefresh: false)
+        saveProfile(for: session, outputDeviceUID: nil, volume: 1, equalizer: .flat)
         mutateSession(session.id) {
             $0.isMuted = false
             $0.desiredVolume = 1
             $0.desiredOutputUID = nil
+            $0.equalizer = .flat
+            $0.isVolumeEngaged = false
         }
         controlStatus = L10n.shared.t("\(session.name): volumen normal", "\(session.name): normal volume", "\(session.name)：通常音量")
     }
@@ -397,17 +460,149 @@ final class ApplicationAudioStore: ObservableObject {
         for index in profiles.indices {
             profiles[index].volume = 1
             profiles[index].outputDeviceUID = nil
+            profiles[index].equalizer = nil
         }
         saveProfiles()
         for index in sessions.indices {
             sessions[index].isMuted = false
             sessions[index].desiredVolume = 1
             sessions[index].desiredOutputUID = nil
+            sessions[index].equalizer = .flat
             sessions[index].isVolumeEngaged = false
         }
         if updateStatus {
             controlStatus = L10n.shared.t("Audio restaurado", "Audio restored", "オーディオを復元しました")
         }
+    }
+
+    // MARK: - Bulk mute
+
+    /// Apps "Silenciar todo" acts on: playing right now and not yet muted.
+    private var mutableSessions: [AppAudioSession] {
+        sessions.filter { $0.isControllable && $0.isProducingAudio && !$0.isMuted }
+    }
+
+    var canMuteAll: Bool { !mutableSessions.isEmpty }
+    var canUnmuteAll: Bool { sessions.contains(where: \.isMuted) }
+
+    /// Mutes every app that is playing. Returns how many ended up muted.
+    @discardableResult
+    func muteAll() -> Int {
+        var muted = 0
+        for session in mutableSessions {
+            setMuted(true, for: session)
+            if isMuted(session.id) { muted += 1 }
+            // One permission prompt or message is enough.
+            if permission == .denied { break }
+        }
+        if muted > 0 {
+            controlStatus = L10n.shared.t(
+                "\(muted) app(s) silenciadas",
+                "\(muted) app(s) muted",
+                "\(muted)個のアプリをミュートしました"
+            )
+        }
+        return muted
+    }
+
+    /// Unmutes every muted app. Returns how many play again.
+    @discardableResult
+    func unmuteAll() -> Int {
+        let targets = sessions.filter(\.isMuted)
+        for session in targets {
+            setMuted(false, for: session)
+        }
+        let restored = targets.filter { !isMuted($0.id) }.count
+        if restored > 0 {
+            controlStatus = L10n.shared.t(
+                "\(restored) app(s) vuelven a sonar",
+                "\(restored) app(s) unmuted",
+                "\(restored)個のアプリのミュートを解除しました"
+            )
+        }
+        return restored
+    }
+
+    /// Mutes everything audible, or unmutes everything once nothing is.
+    @discardableResult
+    func toggleMuteAll() -> Int {
+        canMuteAll ? muteAll() : unmuteAll()
+    }
+
+    /// Keeps `session` audible and mutes every other app that is playing.
+    func muteOthers(than session: AppAudioSession) {
+        if isMuted(session.id) {
+            setMuted(false, for: session)
+        }
+        for other in mutableSessions where other.id != session.id {
+            setMuted(true, for: other)
+            if permission == .denied { return }
+        }
+        controlStatus = L10n.shared.t(
+            "Solo suena \(session.name)",
+            "Only \(session.name) is playing",
+            "\(session.name)のみ再生中"
+        )
+    }
+
+    private func isMuted(_ id: String) -> Bool {
+        sessions.first(where: { $0.id == id })?.isMuted ?? false
+    }
+
+    // MARK: - Global shortcuts
+
+    private func handleGlobalShortcut(_ action: GlobalHotKeys.Action) {
+        guard !isManuallySuspended, !isSystemAsleep else {
+            NSSound.beep()
+            return
+        }
+        // The window may be closed and the app idle: read the current state.
+        refresh()
+        switch action {
+        case .toggleFrontmostApp:
+            toggleMuteForFrontmostApp()
+        case .toggleAllApps:
+            if toggleMuteAll() == 0 { NSSound.beep() }
+        }
+    }
+
+    private func toggleMuteForFrontmostApp() {
+        guard let app = NSWorkspace.shared.frontmostApplication else {
+            NSSound.beep()
+            return
+        }
+        guard let session = session(for: app) else {
+            NSSound.beep()
+            let name = app.localizedName ?? app.bundleIdentifier ?? "?"
+            controlStatus = L10n.shared.t(
+                "\(name) no está reproduciendo audio",
+                "\(name) is not playing audio",
+                "\(name)は音声を再生していません"
+            )
+            return
+        }
+        setMuted(!session.isMuted, for: session)
+    }
+
+    /// The mixer row that represents `app`: FaceTime's call group, the app's
+    /// bundle group, its own process, or Safari's shared WebKit media process.
+    private func session(for app: NSRunningApplication) -> AppAudioSession? {
+        let bundleID = app.bundleIdentifier ?? ""
+        if bundleID == "com.apple.FaceTime",
+           let call = sessions.first(where: { $0.id == "system:facetime-call" }) {
+            return call
+        }
+        if let parent = parentBundleIdentifier(for: app),
+           let session = sessions.first(where: { $0.id == "bundle:\(parent)" }) {
+            return session
+        }
+        if let session = sessions.first(where: { $0.processIdentifier == app.processIdentifier }) {
+            return session
+        }
+        if bundleID.hasPrefix("com.apple.Safari") {
+            return sessions.first { $0.bundleIdentifier?.hasPrefix("com.apple.WebKit") == true }
+        }
+        return nil
     }
 
     @discardableResult
@@ -426,18 +621,12 @@ final class ApplicationAudioStore: ObservableObject {
                     )
                     return false
                 }
-                guard let output = targetOutput(for: control) else {
-                    controlStatus = control.outputUID == nil
-                        ? L10n.shared.t(
-                            "No hay dispositivo de salida disponible para silenciar.",
-                            "No output device available to mute.",
-                            "ミュートに使える出力デバイスがありません。"
-                        )
-                        : L10n.shared.t(
-                            "La salida seleccionada ya no está disponible.",
-                            "The selected output is no longer available.",
-                            "選択した出力は利用できなくなりました。"
-                        )
+                guard let output = muteOutput(for: control) else {
+                    controlStatus = L10n.shared.t(
+                        "No hay dispositivo de salida disponible para silenciar.",
+                        "No output device available to mute.",
+                        "ミュートに使える出力デバイスがありません。"
+                    )
                     return false
                 }
                 let current = muteEngines[key]
@@ -489,6 +678,7 @@ final class ApplicationAudioStore: ObservableObject {
                    Set(tap.processObjectIDs) == Set(processIDs) {
                     tap.gain = VolumeCurve.gain(forSlider: control.volume)
                     tap.makeup = Float(min(8, max(0.5, volumeCompensation)))
+                    tap.equalizer = control.equalizer
                 } else {
                     // A volume tap renders an audible copy of the process. Stop the
                     // previous renderer first so a route change can never play two
@@ -501,6 +691,7 @@ final class ApplicationAudioStore: ObservableObject {
                         processObjectIDs: processIDs,
                         gain: VolumeCurve.gain(forSlider: control.volume),
                         makeup: Float(min(8, max(0.5, volumeCompensation))),
+                        equalizer: control.equalizer,
                         outputUID: output.uid,
                         outputDeviceID: output.id
                     )
@@ -920,7 +1111,7 @@ final class ApplicationAudioStore: ObservableObject {
             guard !wantedIDs.isEmpty else { continue }
 
             let muteMatches = muteEngines[session.id].map {
-                let target = targetOutput(for: control)
+                let target = muteOutput(for: control)
                 return Set($0.processObjectIDs) == wantedIDs
                     && $0.outputUID == target?.uid
                     && $0.outputDeviceID == target?.id
@@ -958,6 +1149,7 @@ final class ApplicationAudioStore: ObservableObject {
         let control = controls[group.key]
         let supportsVolumeControl = processTapVolumeEnabled && hasAudioObject
         let displayedVolume = supportsVolumeControl ? (control?.volume ?? profile?.volume ?? 1) : 1
+        let equalizer = supportsVolumeControl ? (control?.equalizer ?? profile?.equalizer ?? .flat) : .flat
         let outputDeviceIDs = Array(Set(group.outputDeviceIDs))
         let desiredOutputUID: String?
         if let control {
@@ -980,6 +1172,7 @@ final class ApplicationAudioStore: ObservableObject {
             outputDeviceNames: CoreAudioProcessClient.deviceNames(for: outputDeviceIDs),
             desiredVolume: displayedVolume,
             desiredOutputUID: desiredOutputUID,
+            equalizer: equalizer,
             isControllable: hasAudioObject,
             supportsVolumeControl: supportsVolumeControl,
             isVolumeEngaged: volumeTaps[group.key] != nil
@@ -1105,50 +1298,85 @@ final class ApplicationAudioStore: ObservableObject {
 
     // MARK: - Profiles
 
-    func updateOutput(for session: AppAudioSession, outputDeviceUID: String?) {
-        saveProfile(for: session, outputDeviceUID: outputDeviceUID, volume: session.desiredVolume, shouldRefresh: false)
-        mutateSession(session.id) { $0.desiredOutputUID = outputDeviceUID }
+    /// Saves what the app is set to right now: the live intent when there is
+    /// one, otherwise what its row shows.
+    private func persistSettings(for session: AppAudioSession) {
+        let liveSession = sessions.first(where: { $0.id == session.id }) ?? session
+        let control = controls[session.id]
+        let outputUID = if let control { control.outputUID } else { liveSession.desiredOutputUID }
+        saveProfile(
+            for: liveSession,
+            outputDeviceUID: outputUID,
+            volume: control?.volume ?? liveSession.desiredVolume,
+            equalizer: control?.equalizer ?? liveSession.equalizer
+        )
     }
 
-    private func persistVolume(_ volume: Double, for session: AppAudioSession) {
-        saveProfile(for: session, outputDeviceUID: session.desiredOutputUID, volume: volume, shouldRefresh: false)
-    }
-
-    func saveProfile(for session: AppAudioSession, outputDeviceUID: String?, volume: Double, shouldRefresh: Bool = true) {
-        let profile = AudioRouteProfile(
+    private func saveProfile(
+        for session: AppAudioSession,
+        outputDeviceUID: String?,
+        volume: Double,
+        equalizer: AudioEqualizerSettings
+    ) {
+        var profile = AudioRouteProfile(
             name: "\(session.name) route",
             appName: session.name,
             bundleIdentifier: session.bundleIdentifier,
             outputDeviceUID: outputDeviceUID,
-            volume: volume
+            volume: volume,
+            equalizer: equalizer.isFlat ? nil : equalizer
         )
-        profiles.removeAll {
-            AudioProfileMatcher.matches(
-                $0,
-                bundleIdentifier: session.bundleIdentifier,
-                appName: session.name
-            )
+        let isSameApp: (AudioRouteProfile) -> Bool = {
+            AudioProfileMatcher.matches($0, bundleIdentifier: session.bundleIdentifier, appName: session.name)
         }
-        profiles.append(profile)
-        saveProfiles()
-        if shouldRefresh { refresh() }
-    }
-
-    func removeProfile(for session: AppAudioSession) {
-        profiles.removeAll {
-            AudioProfileMatcher.matches(
-                $0,
-                bundleIdentifier: session.bundleIdentifier,
-                appName: session.name
-            )
+        // Update in place so the Saved list keeps its order and row identity.
+        if let index = profiles.firstIndex(where: isSameApp) {
+            profile.id = profiles[index].id
+            profiles[index] = profile
+            profiles.removeAll { $0.id != profile.id && isSameApp($0) }
+        } else {
+            profiles.append(profile)
         }
         saveProfiles()
-        refresh()
     }
 
     func removeProfile(_ profile: AudioRouteProfile) {
         profiles.removeAll { $0.id == profile.id }
         saveProfiles()
+    }
+
+    func removeAllProfiles() {
+        profiles.removeAll()
+        saveProfiles()
+        controlStatus = L10n.shared.t(
+            "Ajustes guardados olvidados",
+            "Saved settings forgotten",
+            "保存済みの設定を削除しました"
+        )
+    }
+
+    // MARK: - Export / import
+
+    func exportedProfilesData() throws -> Data {
+        try AudioProfileArchive(profiles: profiles).encoded()
+    }
+
+    /// Merges an exported file into the saved settings. Imported entries win
+    /// over saved ones for the same app and apply to apps playing right now.
+    @discardableResult
+    func importProfiles(from data: Data) throws -> AudioProfileMerge.Result {
+        let imported = try AudioProfileArchive.decodeProfiles(from: data)
+        let result = AudioProfileMerge.merge(existing: profiles, imported: imported)
+        profiles = result.profiles
+        saveProfiles()
+        attemptedProfileKeys.removeAll()
+        refresh()
+        controlStatus = L10n.shared.t(
+            "Importados: \(result.added) nuevos, \(result.replaced) actualizados",
+            "Imported: \(result.added) new, \(result.replaced) updated",
+            "読み込み: 新規\(result.added)件、更新\(result.replaced)件"
+        )
+        return result
     }
 
     private func loadProfiles() {
