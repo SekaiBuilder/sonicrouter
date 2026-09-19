@@ -73,6 +73,9 @@ struct SonicRouterApp: App {
         .windowResizability(.contentMinSize)
         // Read once at launch; changing the setting applies on the next launch.
         .defaultLaunchBehavior(startInMenuBar ? .suppressed : .presented)
+        .commands {
+            SonicRouterCommands(appStore: appStore, audioStore: audioStore)
+        }
 
         MenuBarExtra {
             MenuBarView()

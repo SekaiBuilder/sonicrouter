@@ -11,7 +11,7 @@ struct ContentView: View {
     @Environment(\.openSettings) private var openSettings
     @ObservedObject private var l10n = L10n.shared
     /// Remembered across launches so the window reopens where you left it.
-    @AppStorage("SonicRouter.LastScreen") private var selection: Screen = .mixer
+    @AppStorage(Screen.storageKey) private var selection: Screen = .mixer
 
     var body: some View {
         HStack(spacing: 0) {
@@ -20,6 +20,11 @@ struct ContentView: View {
             detail
         }
         .onAppear {
+            // However the window came back (menu bar, Finder, a menu command),
+            // a visible window always gets its Dock icon.
+            if NSApp.activationPolicy() != .regular {
+                AppDelegate.showInDock()
+            }
             audioStore.setInterfaceVisible(.mainWindow, true)
             appStore.setInterfaceVisible(.mainWindow, true)
         }
@@ -70,7 +75,6 @@ struct ContentView: View {
                     .font(.callout)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .keyboardShortcut("r", modifiers: .command)
             .buttonStyle(.borderless)
             .foregroundStyle(.secondary)
             .padding(.horizontal, 8)
@@ -148,7 +152,6 @@ private struct SidebarButton: View {
             .shadow(color: isSelected ? Theme.accent.opacity(0.32) : .clear, radius: 5, y: 2)
             .contentShape(Rectangle())
         }
-        .keyboardShortcut(shortcut, modifiers: .command)
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
         .animation(.easeOut(duration: 0.13), value: isHovered)
@@ -156,7 +159,11 @@ private struct SidebarButton: View {
     }
 }
 
-private enum Screen: String, CaseIterable, Identifiable {
+/// Main-window sections. The View menu commands and the sidebar share the
+/// selection through `storageKey`.
+enum Screen: String, CaseIterable, Identifiable {
+    static let storageKey = "SonicRouter.LastScreen"
+
     case mixer
     case devices
     case saved
@@ -193,6 +200,7 @@ private enum Screen: String, CaseIterable, Identifiable {
 private struct StatusBar: View {
     @EnvironmentObject private var audioStore: AudioDeviceStore
     @EnvironmentObject private var appStore: ApplicationAudioStore
+    @ObservedObject private var l10n = L10n.shared
     /// Whichever store reported last: app controls or device actions.
     @State private var message = ""
 
@@ -222,10 +230,13 @@ private struct StatusBar: View {
         .overlay(alignment: .top) { Divider().opacity(0.6) }
         .onChange(of: appStore.controlStatus, initial: true) { _, status in message = status }
         .onChange(of: audioStore.statusMessage) { _, status in message = status }
+        // A message in the previous language would linger; fall back to idle.
+        .onChange(of: l10n.language) { message = "" }
     }
 
     private var statusText: String {
-        audioStore.lastError ?? message
+        if let error = audioStore.lastError { return error }
+        return message.isEmpty ? l10n.t("Listo", "Ready", "準備完了") : message
     }
 
     private var statusSymbol: String {

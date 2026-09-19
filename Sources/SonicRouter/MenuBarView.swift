@@ -10,9 +10,14 @@ struct MenuBarView: View {
     @Environment(\.openSettings) private var openSettings
     @ObservedObject private var l10n = L10n.shared
 
+    /// Unmuting is the only bulk action left: nothing audible to mute.
+    private var offersUnmute: Bool {
+        !appStore.canMuteAll && appStore.canUnmuteAll
+    }
+
     private var playing: [AppAudioSession] {
         appStore.sessions
-            .filter { $0.isProducingAudio || $0.isMuted || $0.isVolumeEngaged || $0.desiredVolume < 0.999 || $0.desiredOutputUID != nil }
+            .filter(\.isShownInMixer)
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
@@ -55,7 +60,8 @@ struct MenuBarView: View {
                             outputDevices: audioStore.outputDevices.filter {
                                 $0.uid != SonicRouterAudioIdentifiers.legacyVirtualDeviceUID
                             },
-                            onSelectOutput: { appStore.setOutputDevice($0, for: session) }
+                            onSelectOutput: { appStore.setOutputDevice($0, for: session) },
+                            onMuteOthers: { appStore.muteOthers(than: session) }
                         )
                     }
                 }
@@ -91,6 +97,16 @@ struct MenuBarView: View {
                 onToggleSuspend: { appStore.setManuallySuspended(!appStore.isManuallySuspended) },
                 onQuit: { NSApp.terminate(nil) }
             )
+            Button {
+                appStore.toggleMuteAll()
+            } label: {
+                Image(systemName: offersUnmute ? "speaker.wave.2" : "speaker.slash")
+            }
+            .buttonStyle(.borderless)
+            .disabled(!appStore.canMuteAll && !appStore.canUnmuteAll)
+            .help(offersUnmute
+                ? l10n.t("Activar todo", "Unmute all", "すべてのミュートを解除")
+                : l10n.t("Silenciar todo", "Mute all", "すべてミュート"))
             Button {
                 appStore.refresh()
                 audioStore.refresh()

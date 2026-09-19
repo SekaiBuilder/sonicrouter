@@ -286,12 +286,22 @@ struct AppMixerRow: View {
     /// hidden (e.g. the compact menu-bar panel).
     var outputDevices: [AudioDevice] = []
     var onSelectOutput: ((String?) -> Void)?
+    /// Mutes every other playing app. Offered in the row's context menu.
+    var onMuteOthers: (() -> Void)?
+    /// Live equalizer changes while dragging; `onCommitEqualizer` persists.
+    var onEqualizer: ((AudioEqualizerSettings) -> Void)?
+    var onCommitEqualizer: (() -> Void)?
 
     @State private var volume: Double = 1
     @State private var isHovered = false
+    @State private var showsEqualizer = false
 
     private var isControlled: Bool {
-        session.isMuted || session.isVolumeEngaged || session.desiredVolume < 0.999 || session.desiredOutputUID != nil
+        session.hasCustomSettings
+    }
+
+    private var offersEqualizer: Bool {
+        !compact && onEqualizer != nil && session.supportsVolumeControl
     }
 
     var body: some View {
@@ -342,6 +352,10 @@ struct AppMixerRow: View {
                 outputPicker(onSelectOutput)
             }
 
+            if offersEqualizer, let onEqualizer {
+                equalizerButton(onEqualizer)
+            }
+
             muteButton
 
             if !compact && isControlled {
@@ -350,7 +364,11 @@ struct AppMixerRow: View {
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
-                .help(L10n.shared.t("Restablecer a volumen normal", "Reset to normal volume", "通常の音量に戻す"))
+                .help(L10n.shared.t(
+                    "Restablecer: volumen normal, salida predeterminada y ecualizador plano",
+                    "Reset: normal volume, default output and flat equalizer",
+                    "リセット：通常の音量、既定の出力、フラットなイコライザー"
+                ))
             }
         }
         .padding(.vertical, compact ? 6 : 9)
@@ -359,6 +377,7 @@ struct AppMixerRow: View {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .fill(!compact && isHovered ? Color.primary.opacity(0.045) : .clear)
         )
+        .contextMenu { rowMenu }
         .onHover { isHovered = $0 }
         .animation(.easeOut(duration: 0.12), value: isHovered)
         .onAppear { volume = session.desiredVolume }
@@ -416,6 +435,70 @@ struct AppMixerRow: View {
               : L10n.shared.t("Silenciar app", "Mute app", "アプリをミュート"))
     }
 
+    @ViewBuilder
+    private var rowMenu: some View {
+        Button {
+            onMute(!session.isMuted)
+        } label: {
+            Label(
+                session.isMuted
+                    ? L10n.shared.t("Activar sonido", "Unmute", "ミュートを解除")
+                    : L10n.shared.t("Silenciar", "Mute", "ミュート"),
+                systemImage: session.isMuted ? "speaker.wave.2" : "speaker.slash"
+            )
+        }
+        .disabled(!session.isControllable)
+
+        if let onMuteOthers {
+            Button {
+                onMuteOthers()
+            } label: {
+                Label(L10n.shared.t("Silenciar las demás", "Mute the others", "他のアプリをミュート"), systemImage: "speaker.slash.circle")
+            }
+            .disabled(!session.isControllable)
+        }
+
+        if offersEqualizer {
+            Button {
+                showsEqualizer = true
+            } label: {
+                Label(L10n.shared.t("Ecualizador…", "Equalizer…", "イコライザー…"), systemImage: "slider.horizontal.3")
+            }
+        }
+
+        Divider()
+
+        Button {
+            onReset()
+        } label: {
+            Label(L10n.shared.t("Restablecer", "Reset", "リセット"), systemImage: "arrow.uturn.backward")
+        }
+        .disabled(!isControlled)
+    }
+
+    private func equalizerButton(_ onChange: @escaping (AudioEqualizerSettings) -> Void) -> some View {
+        Button {
+            showsEqualizer.toggle()
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+                .foregroundStyle(session.equalizer.isFlat ? Color.secondary : Theme.accent)
+        }
+        .buttonStyle(.borderless)
+        .help(
+            session.equalizer.isFlat
+                ? L10n.shared.t("Ecualizador", "Equalizer", "イコライザー")
+                : L10n.shared.t("Ecualizador: ", "Equalizer: ", "イコライザー：") + session.equalizer.summary(L10n.shared)
+        )
+        .popover(isPresented: $showsEqualizer, arrowEdge: .bottom) {
+            EqualizerPanel(
+                appName: session.name,
+                settings: session.equalizer,
+                onChange: onChange,
+                onCommit: { onCommitEqualizer?() }
+            )
+        }
+    }
+
     private var detailText: String? {
         if !session.outputDeviceNames.isEmpty {
             return session.outputDeviceNames.joined(separator: ", ")
@@ -451,8 +534,11 @@ struct AppMixerRow: View {
         } label: {
             Image(systemName: "airplayaudio")
                 .foregroundStyle(selected == nil ? Color.secondary : Theme.accent)
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
         }
-        .menuStyle(.borderlessButton)
+        .menuStyle(.button)
+        .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
         .help(L10n.shared.t("Enviar esta app a otra salida", "Send this app to another output", "このアプリを別の出力へ"))
