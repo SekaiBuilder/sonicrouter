@@ -432,12 +432,36 @@ private func runProfileArchiveTests(_ tests: inout TestState) {
     tests.expect(again.added == 0 && again.profiles.count == 3, "Importing the same file twice must not add rows")
 }
 
+private func runMultiOutputPlanTests(_ tests: inout TestState) {
+    let lg = MultiOutputMember(uid: "hdmi.lg", name: "LG HDR WFHD", isBuiltIn: false, supportedSampleRates: [48_000...48_000])
+    let speakers = MultiOutputMember(
+        uid: "builtin.speakers",
+        name: "MacBook Air Speakers",
+        isBuiltIn: true,
+        supportedSampleRates: [44_100...44_100, 48_000...48_000, 88_200...88_200, 96_000...96_000]
+    )
+    let ordered = MultiOutputPlan.orderedMembers([lg, speakers])
+    tests.expect(ordered.map(\.uid) == ["builtin.speakers", "hdmi.lg"], "The built-in output must be the clock")
+    tests.expect(MultiOutputPlan.orderedMembers([lg]).isEmpty, "One output is not a multi-output device")
+    tests.expect(MultiOutputPlan.orderedMembers([lg, lg]).isEmpty, "Duplicates must not count as two outputs")
+    tests.expect(MultiOutputPlan.sharedSampleRate(for: ordered) == 48_000, "LG + MacBook must share 48 kHz")
+
+    let cd = MultiOutputMember(uid: "usb.cd", name: "USB DAC", isBuiltIn: false, supportedSampleRates: [44_100...44_100])
+    tests.expect(MultiOutputPlan.sharedSampleRate(for: [speakers, cd]) == 44_100, "The first shared rate must win")
+    tests.expect(MultiOutputPlan.sharedSampleRate(for: [lg, cd]) == nil, "No shared rate must be reported as nil")
+    tests.expect(
+        !SonicRouterAudioIdentifiers.isInternalDeviceUID(MultiOutputPlan.deviceUID),
+        "The multi-output device must stay visible and survive launch cleanup"
+    )
+}
+
 private var tests = TestState()
 runPolicyTests(&tests)
 runEqualizerSettingsTests(&tests)
 runFilterDesignTests(&tests)
 runRealtimeEqualizerTests(&tests)
 runProfileArchiveTests(&tests)
+runMultiOutputPlanTests(&tests)
 
 if tests.failures.isEmpty {
     print("SonicRouter policy tests passed: \(tests.checks) checks")
