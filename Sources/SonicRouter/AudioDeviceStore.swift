@@ -85,6 +85,32 @@ final class AudioDeviceStore: ObservableObject {
         }
     }
 
+    /// Physical outputs that can play together in a native multi-output device.
+    var multiOutputCandidates: [AudioDevice] {
+        devices.filter(\.canJoinMultiOutput)
+    }
+
+    var multiOutputDevice: AudioDevice? {
+        devices.first(where: \.isSonicRouterMultiOutput)
+    }
+
+    /// Plays every chosen output at once through macOS itself — native
+    /// sound, not SonicRouter's per-app capture path.
+    func useMultiOutput(_ members: [AudioDevice]) {
+        let names = members.map(\.name).joined(separator: " + ")
+        let deviceName = L10n.shared.t("Salida múltiple", "Multi-output", "複数出力")
+        run(L10n.shared.t("Sonando en \(names)", "Playing on \(names)", "\(names)で再生中")) {
+            try CoreAudioClient.createMultiOutputDevice(members: members, name: deviceName)
+        }
+    }
+
+    func removeMultiOutput() {
+        let fallback = multiOutputCandidates.first { !$0.isBuiltIn } ?? multiOutputCandidates.first
+        run(L10n.shared.t("Salida múltiple quitada", "Multi-output removed", "複数出力を削除しました")) {
+            try CoreAudioClient.removeMultiOutputDevice(fallback: fallback)
+        }
+    }
+
     func setOutputVolume(_ volume: Double, for device: AudioDevice) {
         let percent = Int((volume * 100).rounded())
         runWithoutRefresh(L10n.shared.t("Volumen de salida: \(percent)%", "Output volume: \(percent)%", "出力音量: \(percent)%")) {

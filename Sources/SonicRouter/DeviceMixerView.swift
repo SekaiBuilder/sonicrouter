@@ -25,6 +25,10 @@ struct DeviceMixerView: View {
                         ActiveOutputStrip(device: defaultOutput)
                     }
 
+                    if audioStore.multiOutputCandidates.count >= 2 || audioStore.multiOutputDevice != nil {
+                        MultiOutputCard()
+                    }
+
                     DeviceSection(title: l10n.t("Salidas", "Outputs", "出力")) {
                         LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
                             ForEach(audioStore.outputDevices) { device in
@@ -74,6 +78,96 @@ private struct ActiveOutputStrip: View {
         }
         .padding(14)
         .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+/// Plays the system output on several devices at once through a native
+/// macOS multi-output device, so the sound is the original stream on each.
+private struct MultiOutputCard: View {
+    @EnvironmentObject private var audioStore: AudioDeviceStore
+    @ObservedObject private var l10n = L10n.shared
+    /// UIDs the user turned off; everything else is in, so new devices join by default.
+    @State private var excludedUIDs: Set<String> = []
+
+    private var selected: [AudioDevice] {
+        audioStore.multiOutputCandidates.filter { !excludedUIDs.contains($0.uid) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "hifispeaker.2.fill")
+                    .foregroundStyle(.tint)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(l10n.t("Salida múltiple", "Multi-output", "複数出力"))
+                            .font(.headline)
+                        if audioStore.multiOutputDevice?.isDefaultOutput == true {
+                            Badge(text: l10n.t("activa", "active", "使用中"))
+                        }
+                    }
+                    Text(l10n.t(
+                        "Todo el audio suena a la vez en las salidas elegidas, con el sonido original de macOS.",
+                        "All audio plays at once on the chosen outputs, with macOS's original sound.",
+                        "選んだ出力すべてで、macOSの元の音のまま同時に再生します。"
+                    ))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(audioStore.multiOutputCandidates) { device in
+                    Toggle(device.name, isOn: Binding(
+                        get: { !excludedUIDs.contains(device.uid) },
+                        set: { isOn in
+                            if isOn { excludedUIDs.remove(device.uid) } else { excludedUIDs.insert(device.uid) }
+                        }
+                    ))
+                    .toggleStyle(.checkbox)
+                }
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    audioStore.useMultiOutput(selected)
+                } label: {
+                    Label(
+                        audioStore.multiOutputDevice == nil
+                            ? l10n.t("Crear y usar", "Create and use", "作成して使用")
+                            : l10n.t("Actualizar y usar", "Update and use", "更新して使用"),
+                        systemImage: "speaker.wave.2.circle"
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(selected.count < 2)
+
+                if audioStore.multiOutputDevice != nil {
+                    Button(role: .destructive) {
+                        audioStore.removeMultiOutput()
+                    } label: {
+                        Label(l10n.t("Quitar", "Remove", "削除"), systemImage: "trash")
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+            .controlSize(.small)
+
+            Text(l10n.t(
+                "El volumen se ajusta en cada dispositivo; macOS no da un volumen común a la salida múltiple.",
+                "Set the volume on each device; macOS gives a multi-output device no shared volume.",
+                "音量は各デバイスで調整します。複数出力には共通の音量がありません。"
+            ))
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card()
     }
 }
 

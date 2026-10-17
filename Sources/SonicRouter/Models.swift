@@ -14,6 +14,8 @@ typealias RealtimeEqualizer = SonicRouterCore.RealtimeEqualizer
 typealias AudioProfileArchive = SonicRouterCore.AudioProfileArchive
 typealias AudioProfileArchiveError = SonicRouterCore.AudioProfileArchiveError
 typealias AudioProfileMerge = SonicRouterCore.AudioProfileMerge
+typealias MultiOutputPlan = SonicRouterCore.MultiOutputPlan
+typealias MultiOutputMember = SonicRouterCore.MultiOutputMember
 
 /// UserDefaults keys shared by Settings and the app delegate.
 enum StartupPreferences {
@@ -62,6 +64,12 @@ struct AudioDevice: Identifiable, Hashable {
     var isDefaultOutput: Bool
     var isDefaultInput: Bool
     var isDefaultSystemOutput: Bool
+    /// Built-in speakers/headphone jack: the preferred clock of a multi-output device.
+    var isBuiltIn = false
+    /// A physical output that can join a native multi-output device (not an
+    /// aggregate or virtual driver: macOS cannot nest those).
+    var canJoinMultiOutput = false
+    var isSonicRouterMultiOutput: Bool { uid == MultiOutputPlan.deviceUID }
 }
 
 struct AppAudioSession: Identifiable, Hashable {

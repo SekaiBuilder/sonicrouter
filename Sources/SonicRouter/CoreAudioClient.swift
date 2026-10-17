@@ -20,6 +20,7 @@ enum CoreAudioClient {
             let hasInput = streamCount(for: id, scope: kAudioDevicePropertyScopeInput) > 0
 
             guard hasOutput || hasInput else { return nil }
+            let transport = transportType(for: id)
 
             return AudioDevice(
                 id: id,
@@ -31,7 +32,12 @@ enum CoreAudioClient {
                 inputVolume: hasInput ? volume(for: id, scope: kAudioDevicePropertyScopeInput) : nil,
                 isDefaultOutput: id == defaultOutput,
                 isDefaultInput: id == defaultInput,
-                isDefaultSystemOutput: id == defaultSystemOutput
+                isDefaultSystemOutput: id == defaultSystemOutput,
+                isBuiltIn: transport == kAudioDeviceTransportTypeBuiltIn,
+                canJoinMultiOutput: hasOutput
+                    && transport != kAudioDeviceTransportTypeAggregate
+                    && transport != kAudioDeviceTransportTypeVirtual
+                    && transport != kAudioDeviceTransportTypeUnknown
             )
         }
         .sorted { lhs, rhs in
@@ -281,16 +287,154 @@ private extension CoreAudioClient {
     }
 }
 
+// MARK: - Native multi-output device
+
+extension CoreAudioClient {
+    /// Builds (or rebuilds) SonicRouter's multi-output device from `members`
+    /// and makes it the system output. It is a public, stacked aggregate —
+    /// the same kind Audio MIDI Setup creates — so macOS plays to every member
+    /// natively: no tap, no re-emission, and it keeps working after quitting.
+    @discardableResult
+    static func createMultiOutputDevice(members devices: [AudioDevice], name: String) throws -> AudioObjectID {
+        let members = MultiOutputPlan.orderedMembers(devices.map { device in
+            MultiOutputMember(
+                uid: device.uid,
+                name: device.name,
+                isBuiltIn: device.isBuiltIn,
+                supportedSampleRates: availableSampleRates(for: device.id)
+            )
+        })
+        guard members.count >= 2 else { throw AudioControlError.multiOutputNeedsTwoDevices }
+
+        try destroyMultiOutputDevice()
+
+        // Same rate on every member means none of them resamples.
+        let rate = MultiOutputPlan.sharedSampleRate(for: members)
+        if let rate {
+            for member in members {
+                if let device = devices.first(where: { $0.uid == member.uid }) {
+                    setNominalSampleRate(rate, for: device.id)
+                }
+            }
+        }
+
+        let subDevices: [[String: Any]] = members.enumerated().map { index, member in
+            [
+                kAudioSubDeviceUIDKey: member.uid,
+                // The first member is the clock; the rest follow it.
+                kAudioSubDeviceDriftCompensationKey: index == 0 ? 0 : 1
+            ]
+        }
+        let description: [String: Any] = [
+            kAudioAggregateDeviceNameKey: name,
+            kAudioAggregateDeviceUIDKey: MultiOutputPlan.deviceUID,
+            kAudioAggregateDeviceMainSubDeviceKey: members[0].uid,
+            kAudioAggregateDeviceClockDeviceKey: members[0].uid,
+            kAudioAggregateDeviceIsPrivateKey: 0,
+            kAudioAggregateDeviceIsStackedKey: 1,
+            kAudioAggregateDeviceSubDeviceListKey: subDevices
+        ]
+
+        var deviceID = AudioObjectID(kAudioObjectUnknown)
+        let status = AudioHardwareCreateAggregateDevice(description as CFDictionary, &deviceID)
+        try throwIfNeeded(status, action: .createMultiOutput)
+        guard deviceID != kAudioObjectUnknown else {
+            throw AudioControlError.coreAudio(.createMultiOutput, OSStatus(kAudioHardwareUnspecifiedError))
+        }
+        if let rate { setNominalSampleRate(rate, for: deviceID) }
+
+        try setDefaultOutputWhenReady(deviceID)
+        return deviceID
+    }
+
+    /// Removes SonicRouter's multi-output device. When it was the system
+    /// output, `fallback` takes over so sound never ends up nowhere.
+    static func removeMultiOutputDevice(fallback: AudioDevice?) throws {
+        guard let deviceID = multiOutputDeviceID() else { return }
+        let wasDefault = defaultDevice(selector: kAudioHardwarePropertyDefaultOutputDevice) == deviceID
+        if wasDefault, let fallback {
+            try setDefaultOutput(fallback.id)
+        }
+        try destroyMultiOutputDevice()
+    }
+
+    static func multiOutputDeviceID() -> AudioObjectID? {
+        objectIDs(selector: kAudioHardwarePropertyDevices, objectID: AudioObjectID(kAudioObjectSystemObject))
+            .first { stringProperty(kAudioDevicePropertyDeviceUID, objectID: $0) == MultiOutputPlan.deviceUID }
+    }
+}
+
+private extension CoreAudioClient {
+    static func destroyMultiOutputDevice() throws {
+        guard let deviceID = multiOutputDeviceID() else { return }
+        try throwIfNeeded(AudioHardwareDestroyAggregateDevice(deviceID), action: .removeMultiOutput)
+    }
+
+    /// A freshly created aggregate can take a moment to publish its streams;
+    /// until then the HAL refuses it as the default output.
+    static func setDefaultOutputWhenReady(_ deviceID: AudioObjectID) throws {
+        var lastError: Error?
+        for attempt in 0..<10 {
+            do {
+                try setDefaultOutput(deviceID)
+                return
+            } catch {
+                lastError = error
+                if attempt < 9 { usleep(50_000) }
+            }
+        }
+        if let lastError { throw lastError }
+    }
+
+    static func transportType(for deviceID: AudioObjectID) -> UInt32 {
+        var propertyAddress = address(selector: kAudioDevicePropertyTransportType)
+        var value: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        let status = AudioObjectGetPropertyData(deviceID, &propertyAddress, 0, nil, &size, &value)
+        return status == noErr ? value : kAudioDeviceTransportTypeUnknown
+    }
+
+    static func availableSampleRates(for deviceID: AudioObjectID) -> [ClosedRange<Double>] {
+        var propertyAddress = address(selector: kAudioDevicePropertyAvailableNominalSampleRates)
+        var dataSize: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(deviceID, &propertyAddress, 0, nil, &dataSize) == noErr,
+              dataSize > 0 else { return [] }
+        var ranges = [AudioValueRange](
+            repeating: AudioValueRange(),
+            count: Int(dataSize) / MemoryLayout<AudioValueRange>.size
+        )
+        let status = ranges.withUnsafeMutableBufferPointer { buffer in
+            AudioObjectGetPropertyData(deviceID, &propertyAddress, 0, nil, &dataSize, buffer.baseAddress!)
+        }
+        guard status == noErr else { return [] }
+        return ranges
+            .filter { $0.mMinimum <= $0.mMaximum }
+            .map { $0.mMinimum...$0.mMaximum }
+    }
+
+    static func setNominalSampleRate(_ rate: Double, for deviceID: AudioObjectID) {
+        var propertyAddress = address(selector: kAudioDevicePropertyNominalSampleRate)
+        var isSettable: DarwinBoolean = false
+        guard AudioObjectHasProperty(deviceID, &propertyAddress),
+              AudioObjectIsPropertySettable(deviceID, &propertyAddress, &isSettable) == noErr,
+              isSettable.boolValue else { return }
+        var value = rate
+        AudioObjectSetPropertyData(deviceID, &propertyAddress, 0, nil, UInt32(MemoryLayout<Float64>.size), &value)
+    }
+}
+
 /// What a device operation was trying to do, so failures can be phrased in the
 /// user's language.
 enum CoreAudioAction {
-    case setDefaultDevice, setVolume, setMainVolume
+    case setDefaultDevice, setVolume, setMainVolume, createMultiOutput, removeMultiOutput
 
     var spanish: String {
         switch self {
         case .setDefaultDevice: "cambiar el dispositivo predeterminado"
         case .setVolume: "cambiar el volumen"
         case .setMainVolume: "cambiar el volumen principal"
+        case .createMultiOutput: "crear la salida múltiple"
+        case .removeMultiOutput: "quitar la salida múltiple"
         }
     }
 
@@ -299,6 +443,8 @@ enum CoreAudioAction {
         case .setDefaultDevice: "change the default device"
         case .setVolume: "change the volume"
         case .setMainVolume: "change the main volume"
+        case .createMultiOutput: "create the multi-output device"
+        case .removeMultiOutput: "remove the multi-output device"
         }
     }
 
@@ -307,6 +453,8 @@ enum CoreAudioAction {
         case .setDefaultDevice: "デフォルトデバイスを変更"
         case .setVolume: "音量を変更"
         case .setMainVolume: "メイン音量を変更"
+        case .createMultiOutput: "複数出力デバイスを作成"
+        case .removeMultiOutput: "複数出力デバイスを削除"
         }
     }
 }
@@ -314,6 +462,7 @@ enum CoreAudioAction {
 enum AudioControlError: LocalizedError {
     case coreAudio(CoreAudioAction, OSStatus)
     case volumeNotSettable
+    case multiOutputNeedsTwoDevices
 
     var errorDescription: String? {
         switch self {
@@ -329,6 +478,12 @@ enum AudioControlError: LocalizedError {
                 "Este dispositivo no expone control de volumen por software.",
                 "This device does not expose a software volume control.",
                 "このデバイスはソフトウェアからの音量調整に対応していません。"
+            )
+        case .multiOutputNeedsTwoDevices:
+            return L10n.text(
+                "Elige al menos dos salidas para la salida múltiple.",
+                "Pick at least two outputs for the multi-output device.",
+                "複数出力には少なくとも2つの出力を選んでください。"
             )
         }
     }
