@@ -1,3 +1,4 @@
+import CoreAudio
 import Darwin
 import Foundation
 import SonicRouterCore
@@ -478,6 +479,205 @@ private func runOutputChannelMapTests(_ tests: inout TestState) {
     tests.expect(unknown.deviceCount == 1 && unknown.source(forOutputChannel: 1) == 1, "Unknown layouts must fall back to stereo")
 }
 
+// MARK: - CAM-001: transparent re-emission
+
+/// Deterministic test signal: full-scale edges, tiny and subnormal values,
+/// signed zero and a pseudo-random spread in [-1, 1].
+private func renderTestSamples(count: Int, seed: UInt32) -> [Float] {
+    let edges: [Float] = [1, -1, 0, -0.0, .leastNonzeroMagnitude, -.leastNormalMagnitude, 0.5, -0.999_999_9, 1e-30]
+    var state = seed
+    return (0..<count).map { index in
+        if index < edges.count { return edges[index] }
+        state = state &* 1_664_525 &+ 1_013_904_223
+        return Float(Int32(bitPattern: state)) / Float(Int32.max)
+    }
+}
+
+/// Owns a buffer list with one buffer per entry of `layout` (channels per
+/// buffer) and `frames` frames each, filled from `samples` or zeroed.
+private final class TestBufferList {
+    let list: UnsafeMutableAudioBufferListPointer
+    private let storage: [UnsafeMutablePointer<Float>]
+
+    init(layout: [Int], frames: Int, samples: [[Float]]? = nil) {
+        list = AudioBufferList.allocate(maximumBuffers: layout.count)
+        var owned: [UnsafeMutablePointer<Float>] = []
+        for (index, channels) in layout.enumerated() {
+            let count = channels * frames
+            let pointer = UnsafeMutablePointer<Float>.allocate(capacity: count)
+            pointer.initialize(repeating: 0x1p-3, count: count) // garbage the renderer must overwrite
+            if let samples { for i in 0..<count { pointer[i] = samples[index][i] } }
+            list[index] = AudioBuffer(
+                mNumberChannels: UInt32(channels),
+                mDataByteSize: UInt32(count * MemoryLayout<Float>.stride),
+                mData: UnsafeMutableRawPointer(pointer)
+            )
+            owned.append(pointer)
+        }
+        storage = owned
+    }
+
+    deinit {
+        for pointer in storage { pointer.deallocate() }
+        free(list.unsafeMutablePointer)
+    }
+
+    func samples(_ buffer: Int) -> [Float] {
+        let count = Int(list[buffer].mDataByteSize) / MemoryLayout<Float>.stride
+        return Array(UnsafeBufferPointer(start: storage[buffer], count: count))
+    }
+}
+
+private func render(
+    input: TestBufferList,
+    output: TestBufferList,
+    gain: Float,
+    channelMap: OutputChannelMap = OutputChannelMap(deviceChannelCounts: [2])
+) {
+    let equalizer = RealtimeEqualizer(parameters: EqualizerParameters(.flat), sampleRate: 48_000)
+    StereoRender.copy(
+        input: UnsafePointer(input.list.unsafePointer),
+        output: output.list.unsafeMutablePointer,
+        requestedGain: gain,
+        limiter: RealtimeGainLimiter(initialGain: gain),
+        equalizer: equalizer,
+        channelMap: channelMap
+    )
+}
+
+private func bits(_ values: [Float]) -> [UInt32] { values.map(\.bitPattern) }
+
+private func runRealtimeRenderTests(_ tests: inout TestState) {
+    let frames = 512
+
+    // CAM-001-A01: unity gain, flat EQ → byte-identical, interleaved and planar.
+    let interleaved = [renderTestSamples(count: 2 * frames, seed: 1)]
+    let inInterleaved = TestBufferList(layout: [2], frames: frames, samples: interleaved)
+    let outInterleaved = TestBufferList(layout: [2], frames: frames)
+    render(input: inInterleaved, output: outInterleaved, gain: 1)
+    tests.expect(bits(outInterleaved.samples(0)) == bits(interleaved[0]), "CAM-001-A01: interleaved unity copy must be bit-exact")
+
+    let planar = [renderTestSamples(count: frames, seed: 2), renderTestSamples(count: frames, seed: 3)]
+    let inPlanar = TestBufferList(layout: [1, 1], frames: frames, samples: planar)
+    let outPlanar = TestBufferList(layout: [1, 1], frames: frames)
+    render(input: inPlanar, output: outPlanar, gain: 1)
+    tests.expect(
+        bits(outPlanar.samples(0)) == bits(planar[0]) && bits(outPlanar.samples(1)) == bits(planar[1]),
+        "CAM-001-A01: planar unity copy must be bit-exact"
+    )
+
+    let multichannel = [renderTestSamples(count: 6 * frames, seed: 4)]
+    let inSix = TestBufferList(layout: [6], frames: frames, samples: multichannel)
+    let outSix = TestBufferList(layout: [6], frames: frames)
+    render(input: inSix, output: outSix, gain: 1)
+    tests.expect(bits(outSix.samples(0)) == bits(multichannel[0]), "CAM-001-A01: matching 6-channel layout must copy bit-exact")
+
+    // CAM-001-A02 / R04: gain g ≤ 1 → every sample is exactly input × g.
+    for gain: Float in [0.5, 0.37, 0.99, 0.000_1] {
+        let out = TestBufferList(layout: [2], frames: frames)
+        render(input: inInterleaved, output: out, gain: gain)
+        tests.expect(
+            bits(out.samples(0)) == bits(interleaved[0].map { $0 * gain }),
+            "CAM-001-A02: interleaved samples must be exactly input × \(gain)"
+        )
+        let outP = TestBufferList(layout: [1, 1], frames: frames)
+        render(input: inPlanar, output: outP, gain: gain)
+        tests.expect(
+            bits(outP.samples(0)) == bits(planar[0].map { $0 * gain })
+                && bits(outP.samples(1)) == bits(planar[1].map { $0 * gain }),
+            "CAM-001-A02: planar samples must be exactly input × \(gain)"
+        )
+    }
+
+    // Multi-output map: each device gets L/R scaled exactly, extra channels silent.
+    let outPair = TestBufferList(layout: [2, 2], frames: frames)
+    render(input: inInterleaved, output: outPair, gain: 0.5, channelMap: OutputChannelMap(deviceChannelCounts: [2, 2]))
+    let expectedPair = bits(interleaved[0].map { $0 * 0.5 })
+    tests.expect(
+        bits(outPair.samples(0)) == expectedPair && bits(outPair.samples(1)) == expectedPair,
+        "Multi-output: both devices must receive input × gain bit-exact"
+    )
+
+    // Zero gain renders silence; output never keeps stale buffer contents.
+    let silent = TestBufferList(layout: [2], frames: frames)
+    render(input: inInterleaved, output: silent, gain: 0)
+    tests.expect(silent.samples(0).allSatisfy { $0 == 0 }, "Zero gain must render silence")
+
+    // The limiter passes every gain at or below unity through untouched.
+    let limiter = RealtimeGainLimiter(initialGain: 1)
+    tests.expect(
+        [Float(1), 0.99, 0.5, 0].allSatisfy { limiter.gain(requestedGain: $0, inputPeak: 1) == $0 },
+        "CAM-001-R04: the limiter must not touch gains ≤ 1"
+    )
+}
+
+private func floatFormat(channels: UInt32, planar: Bool = false) -> AudioStreamBasicDescription {
+    var flags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked
+    if planar { flags |= kAudioFormatFlagIsNonInterleaved }
+    let sampleBytes: UInt32 = 4
+    return AudioStreamBasicDescription(
+        mSampleRate: 48_000,
+        mFormatID: kAudioFormatLinearPCM,
+        mFormatFlags: flags,
+        mBytesPerPacket: planar ? sampleBytes : sampleBytes * channels,
+        mFramesPerPacket: 1,
+        mBytesPerFrame: planar ? sampleBytes : sampleBytes * channels,
+        mChannelsPerFrame: channels,
+        mBitsPerChannel: 32,
+        mReserved: 0
+    )
+}
+
+private func runRenderFormatCheckTests(_ tests: inout TestState) {
+    let stereo = floatFormat(channels: 2)
+    tests.expect(RenderFormatCheck.problem(tap: stereo, outputs: [stereo]) == nil, "Float32 stereo must be accepted")
+    tests.expect(
+        RenderFormatCheck.problem(tap: stereo, outputs: [floatFormat(channels: 2, planar: true)]) == nil,
+        "Planar Float32 output must be accepted"
+    )
+    tests.expect(
+        RenderFormatCheck.problem(tap: stereo, outputs: [stereo, floatFormat(channels: 6)]) == nil,
+        "Mixdown tap may fan out to more output channels"
+    )
+
+    // CAM-001-A06 / R05: anything StereoRender cannot copy verbatim is refused.
+    var int16 = stereo
+    int16.mFormatFlags = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked
+    int16.mBitsPerChannel = 16
+    int16.mBytesPerFrame = 4
+    tests.expect(RenderFormatCheck.problem(tap: int16, outputs: [stereo]) == .tapNotFloat32, "CAM-001-A06: Int16 tap must be refused")
+    tests.expect(RenderFormatCheck.problem(tap: stereo, outputs: [int16]) == .outputNotFloat32, "CAM-001-A06: Int16 output must be refused")
+
+    var float64 = stereo
+    float64.mBitsPerChannel = 64
+    float64.mBytesPerFrame = 16
+    tests.expect(RenderFormatCheck.problem(tap: float64, outputs: [stereo]) == .tapNotFloat32, "CAM-001-A06: Float64 tap must be refused")
+
+    var bigEndian = stereo
+    bigEndian.mFormatFlags |= kAudioFormatFlagIsBigEndian
+    tests.expect(RenderFormatCheck.problem(tap: stereo, outputs: [bigEndian]) == .outputNotFloat32, "CAM-001-A06: big-endian output must be refused")
+
+    var badFrame = stereo
+    badFrame.mBytesPerFrame = 4
+    tests.expect(RenderFormatCheck.problem(tap: badFrame, outputs: [stereo]) == .tapNotFloat32, "CAM-001-A06: inconsistent frame size must be refused")
+
+    var encoded = stereo
+    encoded.mFormatID = kAudioFormatAC3
+    tests.expect(RenderFormatCheck.problem(tap: stereo, outputs: [encoded]) == .outputNotFloat32, "CAM-001-A06: encoded output must be refused")
+
+    tests.expect(RenderFormatCheck.problem(tap: stereo, outputs: []) == .noChannels, "No output streams must be refused")
+
+    tests.expect(
+        RenderFormatCheck.problem(tap: floatFormat(channels: 6), outputs: [stereo], oneToOne: true)
+            == .channelMismatch(tap: 6, output: 2),
+        "CAM-001-R05: one-to-one rendering must refuse a channel mismatch"
+    )
+    tests.expect(
+        RenderFormatCheck.problem(tap: floatFormat(channels: 6), outputs: [floatFormat(channels: 6)], oneToOne: true) == nil,
+        "One-to-one rendering must accept matching channels"
+    )
+}
+
 private var tests = TestState()
 runPolicyTests(&tests)
 runEqualizerSettingsTests(&tests)
@@ -486,6 +686,8 @@ runRealtimeEqualizerTests(&tests)
 runProfileArchiveTests(&tests)
 runMultiOutputPlanTests(&tests)
 runOutputChannelMapTests(&tests)
+runRealtimeRenderTests(&tests)
+runRenderFormatCheckTests(&tests)
 
 if tests.failures.isEmpty {
     print("SonicRouter policy tests passed: \(tests.checks) checks")

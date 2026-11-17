@@ -4,8 +4,8 @@
 
 | Qué | Cómo | Cubre |
 |---|---|---|
-| `SonicRouterPolicyTests` (ejecutable, 85 comprobaciones) | `Scripts/test.sh` | Solo `SonicRouterCore`: política de control, ecualizador (respuesta en frecuencia y procesado), formato y fusión de perfiles, plan multi-salida, mapa de canales |
-| Compilación estricta | `swift build -Xswiftc -warnings-as-errors` | Documentada en el README; **no ejecutada** en esta línea base |
+| `SonicRouterPolicyTests` (ejecutable, 111 comprobaciones desde el 2026-11-18) | `Scripts/test.sh` | Solo `SonicRouterCore`: política de control, ecualizador (respuesta en frecuencia y procesado), formato y fusión de perfiles, plan multi-salida, mapa de canales, copia en tiempo real bit a bit y comprobación de formato (CAM-001 A01, A02, A06) |
+| Compilación estricta | `swift build -Xswiftc -warnings-as-errors` | Ejecutada el 2026-11-18 en la rama de CAM-001: OK |
 
 Sin cobertura: motor de audio, clientes Core Audio, stores, interfaz, atajos,
 inicio de sesión. Sin CI.
@@ -17,6 +17,7 @@ Evidencia del 2026-11-15, árbol de `e67f575` más cambios sin guardar, Xcode
 |---|---|
 | `swift build` | OK |
 | `Scripts/test.sh` | 85 comprobaciones, todas pasan |
+| `Scripts/test.sh` (2026-11-18, rama `feature/cam-001-reemision-transparente`) | 111 comprobaciones, todas pasan |
 | `swift build -c release --triple x86_64-apple-macosx15.0 --product SonicRouter` (en carpeta temporal) | Compila. El binario Intel no se ha ejecutado |
 
 ## Estrategia objetivo
@@ -26,7 +27,7 @@ Evidencia del 2026-11-15, árbol de `e67f575` más cambios sin guardar, Xcode
 | Nivel | Qué | Requisito previo |
 |---|---|---|
 | Unitarias | Lo que ya hay, migrado a Swift Testing cuando el proyecto dependa de Xcode ([DEC-005](decisions/README.md) se revisa entonces) | Decisión del titular |
-| Copia de audio | Bit a bit con ganancia 1, exactitud con ganancia g, disposición intercalada y plana, mapa de canales | Mover `StereoRender` al núcleo (CAM-001 T1) |
+| Copia de audio | Bit a bit con ganancia 1, exactitud con ganancia g, disposición intercalada y plana, mapa de canales | **Hecho** el 2026-11-18 (CAM-001 T1) |
 | DSP | Respuesta en frecuencia, estabilidad con silencio largo (denormales), NaN e infinitos a la entrada, deslizamiento de ganancia | Ya en el núcleo |
 | Agrupación de apps | Helpers de Chrome, FaceTime, procesos sin bundle | Extraer la lógica de APP-01-R01 a R03 al núcleo |
 | Perfiles | Archivo malformado, versión futura, 1.001 entradas, valores fuera de rango | Ya cubierto en parte |

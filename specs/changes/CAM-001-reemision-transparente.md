@@ -1,6 +1,7 @@
 # CAM-001 — Re-emisión transparente
 
-Estado: **propuesta, sin implementar**. Fecha: 2026-11-15.
+Estado: **aprobado por el titular el 2026-11-18; T1 y T2 hechos**, T3–T6
+pendientes. Rama: `feature/cam-001-reemision-transparente`. Fecha: 2026-11-15.
 Origen: el titular pide que el sonido sea siempre el original, sin
 deformación ni pérdida de claridad ([DEC-006](../decisions/README.md)).
 Afecta a: [AUD-01](../features/audio-engine.md).
@@ -45,7 +46,16 @@ lo que sale sea **la misma señal multiplicada por la ganancia**, y nada más.
      la frecuencia del dispositivo, sin `alignSampleRates`;
    - **otro dispositivo**: montaje actual (R06).
 2. `StereoRender` pasa a MOD-01 (`SonicRouterCore`) para poder probarlo, y
-   comprueba el formato antes de arrancar.
+   comprueba el formato antes de arrancar. Hecho: `Sources/SonicRouterCore/RealtimeRender.swift`
+   (`GainBox`, `RealtimeGainLimiter`, `StereoRender`, `RenderFormatCheck`),
+   movidos sin cambiar el código salvo `public`.
+
+   Decisión de T2 (2026-11-18): un formato que no se puede leer **no** bloquea
+   el motor; se arranca como antes y queda en el log. Bloquear ahí podría
+   apagar un motor que hoy funciona por un fallo de lectura que no se ha
+   podido observar sin hardware. Se revisa con T4. `oneToOne` (canales
+   iguales) queda preparado para el tap de flujo de dispositivo de T3; la
+   mezcla estéreo actual se reparte con `OutputChannelMap` y no lo usa.
 3. Herramienta `SonicRouterNullTest`: genera la señal, monta el motor, captura
    la re-emisión y da el residuo en dBFS. Es la medida de A03 a A05.
 
@@ -78,8 +88,8 @@ Por comprobar antes de dar el diseño por bueno:
 
 | # | Tarea | Necesita al titular |
 |---|---|---|
-| T1 | Mover `StereoRender`, `GainBox` y `RealtimeGainLimiter` a `SonicRouterCore` y cubrir A01 y A02 | No |
-| T2 | Comprobación de formato (R05, A06) | No |
+| T1 | Mover `StereoRender`, `GainBox` y `RealtimeGainLimiter` a `SonicRouterCore` y cubrir A01 y A02 | No — **hecho 2026-11-18** |
+| T2 | Comprobación de formato (R05, A06) | No — **hecho 2026-11-18** (la parte «la app suena por su ruta nativa» de A06 sigue sin probar con audio real) |
 | T3 | Tap de flujo de dispositivo y montaje sin deriva (R01–R03) | No para escribirlo; sí para probarlo |
 | T4 | `SonicRouterNullTest` (A03–A05) | Sí: permiso de captura de audio para el binario nuevo |
 | T5 | Escucha comparada (A07) y sesión larga | Sí |
@@ -94,4 +104,15 @@ Por comprobar antes de dar el diseño por bueno:
 
 ## Evidencia
 
-Ninguna todavía.
+| Caso | Comando | Commit | Entorno | Resultado |
+|---|---|---|---|---|
+| A01 (ganancia 1, EQ plano: intercalado 2 canales, plano 2×1, intercalado 6 canales; valores extremos, subnormales y −0) | `Scripts/test.sh` | rama `feature/cam-001-reemision-transparente`, commit de T1/T2 | Xcode 27.2, Swift 6.4.2, macOS 27.2 arm64 | Pasa: igual bit a bit |
+| A02 y R04 (g = 0,5; 0,37; 0,99; 0,0001; intercalado y plano; limitador neutro con g ≤ 1; multi-salida [2, 2]) | ídem | ídem | Xcode 27.2, Swift 6.4.2, macOS 27.2 arm64 | Pasa: cada muestra es `entrada × g` bit a bit |
+| A06, parte lógica (Int16, Float64, big-endian, tamaño de trama incoherente, AC-3 y sin flujos rechazados; Float32 intercalado y plano aceptados; `oneToOne` rechaza 6→2) | ídem | ídem | Xcode 27.2, Swift 6.4.2, macOS 27.2 arm64 | Pasa |
+| Las pruebas detectan un error | Mutación temporal: escalar × 1,000001 en la copia rápida | sin commit (revertida) | Xcode 27.2, Swift 6.4.2, macOS 27.2 arm64 | 5 fallos A01/A02, como se espera |
+| Compilación estricta | `swift build -Xswiftc -warnings-as-errors` | ídem | Xcode 27.2, Swift 6.4.2, macOS 27.2 arm64 | OK |
+
+Total de `Scripts/test.sh`: 111 comprobaciones (85 antes), todas pasan.
+
+No ejecutado: A03–A05 y A07 (necesitan T3, T4 y al titular); A06 con un
+dispositivo real de formato no Float32; la app en marcha tras el cambio.

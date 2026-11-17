@@ -17,8 +17,8 @@ en [README.md](README.md#cobertura-de-lectura).
 
 | ID | Módulo | Archivos | Responsabilidad |
 |---|---|---|---|
-| MOD-01 | Núcleo puro | `Sources/SonicRouterCore/` | Política de control, ecualizador (diseño y procesado), formato de perfiles, plan multi-salida, mapa de canales. Sin Core Audio. Único módulo con pruebas |
-| MOD-02 | Motor de audio | `AudioProcessTap.swift` | Taps, dispositivos agregados, IOProc, limpieza de objetos propios, sondeo del permiso |
+| MOD-01 | Núcleo puro | `Sources/SonicRouterCore/` | Política de control, ecualizador (diseño y procesado), formato de perfiles, plan multi-salida, mapa de canales, copia en tiempo real y comprobación de formato (`RealtimeRender.swift`, desde CAM-001). Usa tipos de Core Audio (`AudioBufferList`, `AudioStreamBasicDescription`) pero ninguna llamada al HAL. Único módulo con pruebas |
+| MOD-02 | Motor de audio | `AudioProcessTap.swift` | Taps, dispositivos agregados, IOProc (que llama a `StereoRender` de MOD-01), lectura de formatos, limpieza de objetos propios, sondeo del permiso |
 | MOD-03 | Cliente Core Audio | `CoreAudioClient.swift`, `CoreAudioProcessClient.swift` | Dispositivos, procesos con audio, salida predeterminada, dispositivo multi-salida |
 | MOD-04 | Estado de apps | `ApplicationAudioStore.swift` | Sesiones por app, intención de control, elección de motor, perfiles, escuchas, energía, reposo, protección de llamadas |
 | MOD-05 | Estado de dispositivos | `AudioDeviceStore.swift` | Lista de dispositivos y sus volúmenes |
