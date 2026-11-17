@@ -455,6 +455,29 @@ private func runMultiOutputPlanTests(_ tests: inout TestState) {
     )
 }
 
+private func runOutputChannelMapTests(_ tests: inout TestState) {
+    let single = OutputChannelMap(deviceChannelCounts: [2])
+    tests.expect(single.deviceCount == 1, "One device must keep the fast path")
+    tests.expect(single.source(forOutputChannel: 0) == 0 && single.source(forOutputChannel: 1) == 1, "Stereo must map 1:1")
+    tests.expect(single.source(forOutputChannel: 2) == -1, "Channels past the device must stay silent")
+
+    let pair = OutputChannelMap(deviceChannelCounts: [2, 2])
+    tests.expect(pair.deviceCount == 2, "Two devices must fan out")
+    tests.expect(
+        (0..<4).map(pair.source(forOutputChannel:)) == [0, 1, 0, 1],
+        "Each device must get L/R on its own first two channels"
+    )
+
+    let surround = OutputChannelMap(deviceChannelCounts: [2, 6])
+    tests.expect(
+        (0..<8).map(surround.source(forOutputChannel:)) == [0, 1, 0, 1, -1, -1, -1, -1],
+        "Extra channels on a multichannel device must stay silent"
+    )
+
+    let unknown = OutputChannelMap(deviceChannelCounts: [])
+    tests.expect(unknown.deviceCount == 1 && unknown.source(forOutputChannel: 1) == 1, "Unknown layouts must fall back to stereo")
+}
+
 private var tests = TestState()
 runPolicyTests(&tests)
 runEqualizerSettingsTests(&tests)
@@ -462,6 +485,7 @@ runFilterDesignTests(&tests)
 runRealtimeEqualizerTests(&tests)
 runProfileArchiveTests(&tests)
 runMultiOutputPlanTests(&tests)
+runOutputChannelMapTests(&tests)
 
 if tests.failures.isEmpty {
     print("SonicRouter policy tests passed: \(tests.checks) checks")

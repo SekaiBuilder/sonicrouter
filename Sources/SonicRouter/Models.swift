@@ -16,6 +16,7 @@ typealias AudioProfileArchiveError = SonicRouterCore.AudioProfileArchiveError
 typealias AudioProfileMerge = SonicRouterCore.AudioProfileMerge
 typealias MultiOutputPlan = SonicRouterCore.MultiOutputPlan
 typealias MultiOutputMember = SonicRouterCore.MultiOutputMember
+typealias OutputChannelMap = SonicRouterCore.OutputChannelMap
 
 /// UserDefaults keys shared by Settings and the app delegate.
 enum StartupPreferences {
@@ -91,6 +92,10 @@ struct AppAudioSession: Identifiable, Hashable {
     var supportsVolumeControl: Bool
     /// True while the re-emit volume engine owns this app's audio path.
     var isVolumeEngaged: Bool
+    /// The app is capturing the microphone while it plays — a call. Its
+    /// echo canceller only works on its own native output, so SonicRouter
+    /// never re-emits it (see `ApplicationAudioStore.applyCallProtection`).
+    var isInCall = false
 }
 
 extension AppAudioSession {

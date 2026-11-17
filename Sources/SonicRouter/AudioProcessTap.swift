@@ -276,15 +276,17 @@ enum AudioCapturePermission {
 /// Copies an app's tapped audio into the output device buffers, scaled by gain,
 /// then runs the app's equalizer over them in place. Handles interleaved and
 /// planar Float32 layouts so it works across output devices. The fast path
-/// (matching layouts) does a straight vDSP scale with no allocation; the
-/// fallback downmixes to L/R for mismatched layouts.
+/// (one device, matching layouts) does a straight vDSP scale with no
+/// allocation; otherwise `channelMap` sends L/R to the first two channels of
+/// every output device in the aggregate.
 enum StereoRender {
     static func copy(
         input: UnsafePointer<AudioBufferList>,
         output: UnsafeMutablePointer<AudioBufferList>,
         requestedGain: Float,
         limiter: RealtimeGainLimiter,
-        equalizer: RealtimeEqualizer
+        equalizer: RealtimeEqualizer,
+        channelMap: OutputChannelMap
     ) {
         let inList = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
         let outList = UnsafeMutableAudioBufferListPointer(output)
@@ -301,8 +303,8 @@ enum StereoRender {
         )
         guard gain > 0 else { return }
 
-        if !fastCopy(inList: inList, outList: outList, gain: gain) {
-            copyStereoFallback(inList: inList, outList: outList, gain: gain)
+        if channelMap.deviceCount > 1 || !fastCopy(inList: inList, outList: outList, gain: gain) {
+            copyMapped(inList: inList, outList: outList, gain: gain, channelMap: channelMap)
         }
         applyEqualizer(equalizer, to: outList)
     }
@@ -374,13 +376,14 @@ enum StereoRender {
         return true
     }
 
-    /// Allocation-free fallback for devices whose tap/output buffer layouts do
-    /// not match. Only the first two channels are emitted; extra output channels
-    /// stay silent instead of receiving duplicated left-channel audio.
-    private static func copyStereoFallback(
+    /// Allocation-free copy driven by `channelMap`: each output device gets
+    /// L/R on its first two channels; extra channels stay silent instead of
+    /// receiving duplicated left-channel audio.
+    private static func copyMapped(
         inList: UnsafeMutableAudioBufferListPointer,
         outList: UnsafeMutableAudioBufferListPointer,
-        gain: Float
+        gain: Float,
+        channelMap: OutputChannelMap
     ) {
         let inputChannels = inList.reduce(0) { $0 + max(1, Int($1.mNumberChannels)) }
         guard inputChannels > 0 else { return }
@@ -396,9 +399,9 @@ enum StereoRender {
             let samples = data.assumingMemoryBound(to: Float.self)
 
             for channel in 0..<channels {
-                let absoluteChannel = outputChannel + channel
-                guard absoluteChannel < 2 else { continue }
-                let sourceChannel = absoluteChannel < inputChannels ? absoluteChannel : 0
+                let mapped = channelMap.source(forOutputChannel: outputChannel + channel)
+                guard mapped >= 0 else { continue }
+                let sourceChannel = mapped < inputChannels ? mapped : 0
                 for frame in 0..<frames {
                     samples[frame * channels + channel] = sample(
                         from: inList,
@@ -452,37 +455,184 @@ private enum TapAggregate {
         return value.takeRetainedValue() as String
     }
 
+    /// `outputs` are physical devices; the first one is the clock and every
+    /// other one follows it with drift compensation. Compensation runs at
+    /// maximum quality: the default resampler is audibly dull ("filtered").
     static func composition(
         name: String,
         uid: String,
-        outputUID: String,
+        outputs: [PhysicalOutput],
         tapUID: String,
         tapDriftCompensation: Bool = false
     ) -> CFDictionary {
-        [
+        let maxQuality = kAudioAggregateDriftCompensationMaxQuality
+        let subDevices: [[String: Any]] = outputs.enumerated().map { index, output in
+            index == 0
+                ? [kAudioSubDeviceUIDKey: output.uid]
+                : [
+                    kAudioSubDeviceUIDKey: output.uid,
+                    kAudioSubDeviceDriftCompensationKey: 1,
+                    kAudioSubDeviceDriftCompensationQualityKey: maxQuality
+                ]
+        }
+        let tap: [String: Any] = tapDriftCompensation
+            ? [
+                kAudioSubTapUIDKey: tapUID,
+                kAudioSubTapDriftCompensationKey: true,
+                kAudioSubTapDriftCompensationQualityKey: maxQuality
+            ]
+            : [kAudioSubTapUIDKey: tapUID]
+        return [
             kAudioAggregateDeviceNameKey: name,
             kAudioAggregateDeviceUIDKey: uid,
-            kAudioAggregateDeviceMainSubDeviceKey: outputUID,
+            kAudioAggregateDeviceMainSubDeviceKey: outputs.first?.uid ?? "",
             kAudioAggregateDeviceIsPrivateKey: 1,
             kAudioAggregateDeviceIsStackedKey: 0,
             kAudioAggregateDeviceTapAutoStartKey: 1,
-            kAudioAggregateDeviceSubDeviceListKey: [[kAudioSubDeviceUIDKey: outputUID]],
-            kAudioAggregateDeviceTapListKey: [
-                tapDriftCompensation
-                    ? [kAudioSubTapUIDKey: tapUID, kAudioSubTapDriftCompensationKey: true]
-                    : [kAudioSubTapUIDKey: tapUID]
-            ]
+            kAudioAggregateDeviceSubDeviceListKey: subDevices,
+            kAudioAggregateDeviceTapListKey: [tap]
         ] as CFDictionary
     }
 
-    /// Pins the aggregate's sample rate to the real output device's rate so the
-    /// tap is delivered at the same rate the IOProc writes out. A rate mismatch
-    /// (more likely after a macOS update changed tap defaults) means the render
-    /// copies frames that don't line up — heard as noise/choppiness. Matching the
-    /// rate keeps the path a clean, sample-aligned attenuation with no resampling.
-    static func matchSampleRate(aggregateID: AudioObjectID, to outputDeviceID: AudioObjectID) {
-        guard let rate = nominalSampleRate(outputDeviceID) else { return }
-        setNominalSampleRate(rate, on: aggregateID)
+    struct PhysicalOutput {
+        let uid: String
+        let id: AudioObjectID
+    }
+
+    /// Aggregates cannot contain aggregates, so a multi-output device (ours or
+    /// one from Audio MIDI Setup) is expanded into the devices it plays on.
+    static func physicalOutputs(uid: String, id: AudioObjectID) -> [PhysicalOutput] {
+        guard classID(id) == kAudioAggregateDeviceClassID else { return [PhysicalOutput(uid: uid, id: id)] }
+        let members = objectIDs(kAudioAggregateDevicePropertyActiveSubDeviceList, objectID: id)
+            .compactMap { memberID -> PhysicalOutput? in
+                let memberUID = stringProperty(kAudioDevicePropertyDeviceUID, objectID: memberID)
+                guard !memberUID.isEmpty, outputChannelCount(memberID) > 0 else { return nil }
+                return PhysicalOutput(uid: memberUID, id: memberID)
+            }
+        return members.isEmpty ? [PhysicalOutput(uid: uid, id: id)] : members
+    }
+
+    static func outputChannelCount(_ deviceID: AudioObjectID) -> Int {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreamConfiguration,
+            mScope: kAudioObjectPropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(deviceID, &address, 0, nil, &size) == noErr, size > 0 else { return 0 }
+        let raw = UnsafeMutableRawPointer.allocate(byteCount: Int(size), alignment: MemoryLayout<AudioBufferList>.alignment)
+        defer { raw.deallocate() }
+        guard AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, raw) == noErr else { return 0 }
+        let list = UnsafeMutableAudioBufferListPointer(raw.assumingMemoryBound(to: AudioBufferList.self))
+        return list.reduce(0) { $0 + Int($1.mNumberChannels) }
+    }
+
+    /// Runs every output at the rate the app already plays at (the system
+    /// output's), when the device supports it, so the tapped audio reaches
+    /// the speakers without sample-rate conversion — only clock drift is
+    /// corrected. The aggregate follows its clock device.
+    static func alignSampleRates(aggregateID: AudioObjectID, outputs: [PhysicalOutput]) {
+        if let sourceRate = systemOutputSampleRate() {
+            for output in outputs where supports(sourceRate, deviceID: output.id) {
+                if nominalSampleRate(output.id) != sourceRate {
+                    setNominalSampleRate(sourceRate, on: output.id)
+                }
+            }
+        }
+        if let clock = outputs.first, let rate = nominalSampleRate(clock.id) {
+            setNominalSampleRate(rate, on: aggregateID)
+        }
+    }
+
+    private static func systemOutputSampleRate() -> Float64? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var deviceID = AudioObjectID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID) == noErr,
+              deviceID != kAudioObjectUnknown else { return nil }
+        return nominalSampleRate(deviceID)
+    }
+
+    private static func supports(_ rate: Float64, deviceID: AudioObjectID) -> Bool {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyAvailableNominalSampleRates,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(deviceID, &address, 0, nil, &size) == noErr, size > 0 else { return false }
+        var ranges = [AudioValueRange](repeating: AudioValueRange(), count: Int(size) / MemoryLayout<AudioValueRange>.size)
+        let status = ranges.withUnsafeMutableBufferPointer { buffer in
+            AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, buffer.baseAddress!)
+        }
+        return status == noErr && ranges.contains { $0.mMinimum <= rate && rate <= $0.mMaximum }
+    }
+
+    private static func classID(_ objectID: AudioObjectID) -> AudioClassID {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioObjectPropertyClass,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var value: AudioClassID = 0
+        var size = UInt32(MemoryLayout<AudioClassID>.size)
+        return AudioObjectGetPropertyData(objectID, &address, 0, nil, &size, &value) == noErr ? value : 0
+    }
+
+    private static func objectIDs(_ selector: AudioObjectPropertySelector, objectID: AudioObjectID) -> [AudioObjectID] {
+        var address = AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(objectID, &address, 0, nil, &size) == noErr, size > 0 else { return [] }
+        var ids = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+        let status = ids.withUnsafeMutableBufferPointer { buffer in
+            AudioObjectGetPropertyData(objectID, &address, 0, nil, &size, buffer.baseAddress!)
+        }
+        return status == noErr ? ids : []
+    }
+
+    private static func stringProperty(_ selector: AudioObjectPropertySelector, objectID: AudioObjectID) -> String {
+        var address = AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var value: Unmanaged<CFString>?
+        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        let status = withUnsafeMutablePointer(to: &value) { pointer in
+            AudioObjectGetPropertyData(objectID, &address, 0, nil, &size, pointer)
+        }
+        guard status == noErr, let value else { return "" }
+        return value.takeRetainedValue() as String
+    }
+
+    /// Smaller IO buffers shorten the tap → output path. Clamped to the
+    /// range the aggregate accepts.
+    static func setBufferFrameSize(_ frames: UInt32, on deviceID: AudioObjectID) {
+        var rangeAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyBufferFrameSizeRange,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var range = AudioValueRange()
+        var rangeSize = UInt32(MemoryLayout<AudioValueRange>.size)
+        var value = frames
+        if AudioObjectGetPropertyData(deviceID, &rangeAddress, 0, nil, &rangeSize, &range) == noErr {
+            value = UInt32(min(max(Double(frames), range.mMinimum), range.mMaximum))
+        }
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyBufferFrameSize,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        AudioObjectSetPropertyData(deviceID, &address, 0, nil, UInt32(MemoryLayout<UInt32>.size), &value)
     }
 
     static func nominalSampleRate(_ deviceID: AudioObjectID) -> Float64? {
@@ -548,10 +698,12 @@ final class MuteEngine {
         }
         tapID = newTap
 
+        // Mute emits silence, so its clock only needs one physical device.
+        let clock = Array(TapAggregate.physicalOutputs(uid: outputUID, id: outputDeviceID).prefix(1))
         let composition = TapAggregate.composition(
             name: "SonicRouter Mute \(name)",
             uid: "local.sonicrouter.agg.mute.\(uuid.uuidString)",
-            outputUID: outputUID,
+            outputs: clock,
             tapUID: TapAggregate.tapUID(tapID, fallback: uuid)
         )
 
@@ -562,7 +714,7 @@ final class MuteEngine {
             throw TapError.coreAudio(.createMuteDevice, aggStatus)
         }
         aggregateID = newAggregate
-        TapAggregate.matchSampleRate(aggregateID: aggregateID, to: outputDeviceID)
+        TapAggregate.alignSampleRates(aggregateID: aggregateID, outputs: clock)
 
         let ioBlock: AudioDeviceIOBlock = { _, _, _, outputData, _ in
             let outList = UnsafeMutableAudioBufferListPointer(outputData)
@@ -678,10 +830,11 @@ final class AppVolumeTap {
         }
         tapID = newTap
 
+        let outputs = TapAggregate.physicalOutputs(uid: outputUID, id: outputDeviceID)
         let composition = TapAggregate.composition(
             name: "SonicRouter Volume \(pid)",
             uid: "local.sonicrouter.agg.vol.\(uuid.uuidString)",
-            outputUID: outputUID,
+            outputs: outputs,
             tapUID: TapAggregate.tapUID(tapID, fallback: uuid),
             tapDriftCompensation: true
         )
@@ -693,7 +846,11 @@ final class AppVolumeTap {
             throw TapError.coreAudio(.createVolumeDevice, aggStatus)
         }
         aggregateID = newAggregate
-        TapAggregate.matchSampleRate(aggregateID: aggregateID, to: outputDeviceID)
+        TapAggregate.alignSampleRates(aggregateID: aggregateID, outputs: outputs)
+        // 256 frames (~5 ms) cut the measured tap → speaker delay from ~66 ms
+        // to ~50 ms; 128 gained only a few ms more at a higher CPU cost.
+        TapAggregate.setBufferFrameSize(256, on: aggregateID)
+        let channelMap = OutputChannelMap(deviceChannelCounts: outputs.map { TapAggregate.outputChannelCount($0.id) })
         // The equalizer's filters are designed for the rate the IOProc runs at.
         let sampleRate = TapAggregate.nominalSampleRate(aggregateID)
             ?? TapAggregate.nominalSampleRate(outputDeviceID)
@@ -708,7 +865,8 @@ final class AppVolumeTap {
                 output: outputData,
                 requestedGain: box.gain * box.makeup,
                 limiter: limiter,
-                equalizer: equalizer
+                equalizer: equalizer,
+                channelMap: channelMap
             )
         }
 
@@ -725,7 +883,7 @@ final class AppVolumeTap {
             invalidate()
             throw TapError.coreAudio(.startVolume, startStatus)
         }
-        tapLog.debug("Volume engine active for pid \(self.pid) at gain \(self.gain), \(sampleRate) Hz")
+        tapLog.notice("Volume engine active for pid \(self.pid) on \(outputs.count) device(s) at \(sampleRate) Hz")
         logStreamFormats()
     }
 

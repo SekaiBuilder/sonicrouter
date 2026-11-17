@@ -44,8 +44,10 @@ final class ApplicationAudioStore: ObservableObject {
     }
 
     private let profilesKey = "SonicRouter.RouteProfiles"
-    private let compensationKey = "SonicRouter.VolumeCompensation.v4"
-    private let legacyCompensationKey = "SonicRouter.VolumeCompensation.v2"
+    /// v5 starts every install at a transparent 1.0×: older builds saved
+    /// boosts (1.8× and up) that kept the realtime limiter compressing every
+    /// routed app, which is what made re-emitted audio sound processed.
+    private let compensationKey = "SonicRouter.VolumeCompensation.v5"
     private var refreshTask: Task<Void, Never>?
 
     /// Desired per-app control, keyed by an app/group identity. Many apps
@@ -91,8 +93,6 @@ final class ApplicationAudioStore: ObservableObject {
         loadProfiles()
         if let saved = UserDefaults.standard.object(forKey: compensationKey) as? Double {
             volumeCompensation = min(8, max(0.5, saved))
-        } else if let calibrated = UserDefaults.standard.object(forKey: legacyCompensationKey) as? Double {
-            volumeCompensation = min(8, max(0.5, calibrated))
         }
         installTerminationObserver()
         installSleepWakeObservers()
@@ -224,6 +224,7 @@ final class ApplicationAudioStore: ObservableObject {
         var audioProcessIDs: [AudioObjectID]
         var activeAudioProcessIDs: [AudioObjectID]
         var isProducingAudio: Bool
+        var isRunningInput: Bool
         var outputDeviceIDs: [AudioObjectID]
     }
 
@@ -280,6 +281,7 @@ final class ApplicationAudioStore: ObservableObject {
                     audioProcessIDs: [],
                     activeAudioProcessIDs: [],
                     isProducingAudio: false,
+                    isRunningInput: false,
                     outputDeviceIDs: []
                 )
             }
@@ -290,6 +292,7 @@ final class ApplicationAudioStore: ObservableObject {
                     group.activeAudioProcessIDs.append(info.objectID)
                 }
                 group.isProducingAudio = group.isProducingAudio || info.isRunningOutput
+                group.isRunningInput = group.isRunningInput || info.isRunningInput
                 group.outputDeviceIDs.append(contentsOf: info.outputDeviceIDs)
 
                 if shouldShowOrKeep, let preferredApp {
@@ -313,6 +316,7 @@ final class ApplicationAudioStore: ObservableObject {
 
         restoreProfilesIfNeeded()
         reconcileControlEngines()
+        restoreOutputAfterCallIfNeeded()
         reconcileLifecycle(presentKeys: Set(groups.keys))
         scannerStatus = activeAudioCount == 0
             ? L10n.shared.t("Ninguna app reproduce audio ahora", "No app is playing audio right now", "音声を再生中のアプリはありません")
@@ -363,7 +367,9 @@ final class ApplicationAudioStore: ObservableObject {
         let previous = controls[session.id]
         var control = previous ?? newControl(for: session)
         control.volume = clamped
-        control.outputUID = normalizedOutputUID(control.outputUID)
+        if callRoute?.sessionID != session.id {
+            control.outputUID = normalizedOutputUID(control.outputUID)
+        }
         controls[session.id] = control
 
         guard session.supportsVolumeControl, !controlProcessIDs(for: session).isEmpty else {
@@ -396,7 +402,9 @@ final class ApplicationAudioStore: ObservableObject {
         let previous = controls[session.id]
         var control = previous ?? newControl(for: session)
         control.equalizer = settings
-        control.outputUID = normalizedOutputUID(control.outputUID)
+        if callRoute?.sessionID != session.id {
+            control.outputUID = normalizedOutputUID(control.outputUID)
+        }
         controls[session.id] = control
 
         guard session.supportsVolumeControl, !controlProcessIDs(for: session).isEmpty else {
@@ -645,6 +653,11 @@ final class ApplicationAudioStore: ObservableObject {
                 return true
             }
 
+            if control.wantsVolumeEngine, session.isInCall {
+                applyCallProtection(session: session, control: control)
+                return true
+            }
+
             // Full volume on the default output must be the app's untouched
             // native path. This also guarantees that returning to 100% restores
             // the Mac's exact level without quitting SonicRouter.
@@ -719,6 +732,71 @@ final class ApplicationAudioStore: ObservableObject {
             controlStatus = error.localizedDescription
             return false
         }
+    }
+
+    // MARK: - Call protection
+
+    /// Set while a call's route has temporarily become the system output; holds
+    /// the output to give back when the call ends.
+    private var callRoute: (sessionID: String, outputUID: String, previousOutputUID: String)?
+
+    /// Calls must never be re-emitted. The call app's echo canceller subtracts
+    /// the audio *it* plays from the microphone; once SonicRouter mutes that
+    /// path and plays a copy elsewhere, with its own latency and clock, the
+    /// canceller no longer recognises it and the other side hears their own
+    /// voice back. So the call stays on its native path: a routed call moves
+    /// the system output to its device for the length of the call instead.
+    private func applyCallProtection(session: AppAudioSession, control: Control) {
+        let key = session.id
+        tearDownAll(key)
+        mutateSession(key) { $0.isVolumeEngaged = false }
+
+        if let uid = control.outputUID,
+           let device = CoreAudioClient.devices().first(where: { $0.uid == uid && $0.hasOutput }) {
+            let current = CoreAudioClient.defaultOutputDeviceUID()
+            if current != uid {
+                do {
+                    try CoreAudioClient.setDefaultOutput(device.id)
+                    if callRoute == nil, let current {
+                        callRoute = (key, uid, current)
+                    }
+                } catch {
+                    controlStatus = error.localizedDescription
+                    return
+                }
+            } else if callRoute == nil, let current, current != uid {
+                callRoute = (key, uid, current)
+            }
+            controlStatus = L10n.shared.t(
+                "\(session.name): llamada nativa en \(device.name), sin eco",
+                "\(session.name): native call on \(device.name), no echo",
+                "\(session.name)：\(device.name)でネイティブ通話（エコーなし）"
+            )
+        } else {
+            controlStatus = L10n.shared.t(
+                "\(session.name): llamada nativa, sin eco",
+                "\(session.name): native call, no echo",
+                "\(session.name)：ネイティブ通話（エコーなし）"
+            )
+        }
+    }
+
+    private func callOutputNeedsUpdate(for control: Control) -> Bool {
+        guard let uid = control.outputUID else { return false }
+        return CoreAudioClient.defaultOutputDeviceUID() != uid
+    }
+
+    /// Gives the system output back once the call that borrowed it is over.
+    /// If the user picked another output meanwhile, their choice wins.
+    private func restoreOutputAfterCallIfNeeded() {
+        guard let route = callRoute else { return }
+        let stillInCall = sessions.first(where: { $0.id == route.sessionID })?.isInCall ?? false
+        guard !stillInCall else { return }
+        callRoute = nil
+        guard CoreAudioClient.defaultOutputDeviceUID() == route.outputUID,
+              let previous = CoreAudioClient.devices().first(where: { $0.uid == route.previousOutputUID && $0.hasOutput })
+        else { return }
+        try? CoreAudioClient.setDefaultOutput(previous.id)
     }
 
     // MARK: - Lifecycle reconciliation
@@ -919,6 +997,8 @@ final class ApplicationAudioStore: ObservableObject {
     private func installProcessListeners(for objectID: AudioObjectID) {
         let properties: [(AudioObjectPropertySelector, AudioObjectPropertyScope)] = [
             (kAudioProcessPropertyIsRunningOutput, kAudioObjectPropertyScopeGlobal),
+            // Starting or ending a call flips input; call protection must follow it.
+            (kAudioProcessPropertyIsRunningInput, kAudioObjectPropertyScopeGlobal),
             (kAudioProcessPropertyDevices, kAudioDevicePropertyScopeOutput)
         ]
 
@@ -1123,6 +1203,15 @@ final class ApplicationAudioStore: ObservableObject {
                     && $0.outputDeviceID == target?.id
             } ?? false
 
+            if session.isInCall, !control.wantsMute, control.wantsVolumeEngine {
+                // Drop any re-emitter left from before the call, and follow the
+                // call's route with the system output.
+                if volumeTaps[session.id] != nil || callOutputNeedsUpdate(for: control) {
+                    _ = apply(session: session, control: control)
+                }
+                continue
+            }
+
             if control.wantsMute ? !muteMatches : (control.wantsVolumeEngine && !volumeMatches) {
                 _ = apply(session: session, control: control)
             }
@@ -1175,7 +1264,8 @@ final class ApplicationAudioStore: ObservableObject {
             equalizer: equalizer,
             isControllable: hasAudioObject,
             supportsVolumeControl: supportsVolumeControl,
-            isVolumeEngaged: volumeTaps[group.key] != nil
+            isVolumeEngaged: volumeTaps[group.key] != nil,
+            isInCall: group.isRunningInput && group.isProducingAudio
         )
     }
 

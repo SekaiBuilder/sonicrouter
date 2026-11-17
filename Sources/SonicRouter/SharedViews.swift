@@ -316,6 +316,18 @@ struct AppMixerRow: View {
                     if session.isProducingAudio {
                         PlayingBars()
                     }
+                    if session.isInCall {
+                        Label(L10n.shared.t("Llamada nativa", "Native call", "通話はネイティブ"), systemImage: "phone.fill")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.green)
+                            .labelStyle(.titleAndIcon)
+                            .lineLimit(1)
+                            .help(L10n.shared.t(
+                                "Durante la llamada el audio sale directo por macOS para que el cancelador de eco funcione y nadie escuche su voz repetida.",
+                                "During the call audio goes straight through macOS so echo cancellation works and nobody hears their voice twice.",
+                                "通話中は音声をmacOSから直接出力し、エコーキャンセルを有効に保ちます。"
+                            ))
+                    }
                     Spacer(minLength: 0)
                     if !compact, let detail = detailText {
                         Text(detail)
