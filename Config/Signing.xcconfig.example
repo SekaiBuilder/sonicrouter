@@ -1,0 +1,25 @@
+// Copiar a Config/Signing.xcconfig (que debe estar en .gitignore) y rellenar
+// cuando la cuenta de Apple Developer esté activa. No guardar nunca
+// contraseñas, claves .p8 ni perfiles en el repositorio.
+
+// Identificador del equipo (Membership en developer.apple.com).
+DEVELOPMENT_TEAM =
+
+// Identificador de la app registrado en Certificates, Identifiers & Profiles.
+// Hoy el código usa local.sonicrouter.app (ver specs/decisions, DEC-104).
+PRODUCT_BUNDLE_IDENTIFIER =
+
+// Versión visible y número de compilación. Hoy: 1.5 y 7 (Scripts/build-app.sh).
+MARKETING_VERSION = 1.5
+CURRENT_PROJECT_VERSION = 7
+
+// Canal Mac App Store
+CODE_SIGN_IDENTITY_MAS = Apple Distribution
+INSTALLER_IDENTITY_MAS = 3rd Party Mac Developer Installer
+
+// Canal directo
+CODE_SIGN_IDENTITY_DIRECT = Developer ID Application
+
+// Perfil de notarytool guardado en el llavero con
+// `xcrun notarytool store-credentials`. Solo el nombre del perfil.
+NOTARY_KEYCHAIN_PROFILE =
