@@ -6,6 +6,7 @@
 |---|---|---|
 | `SonicRouterPolicyTests` (ejecutable, 141 comprobaciones desde el 2026-11-18) | `Scripts/test.sh` | `SonicRouterCore` y el núcleo C++ `SonicRouterDSP`: política de control, ecualizador (respuesta en frecuencia y procesado), formato y fusión de perfiles, plan multi-salida, mapa de canales, copia bit a bit, comprobación de formato (CAM-001 A01, A02, A06) y equivalencia bit a bit con la versión Swift anterior (CAM-003, oráculo en `SwiftReference.swift`) |
 | `SonicRouterBench` | `swift run -c release SonicRouterBench` | Coste por bloque del render con búferes sintéticos (CAM-003-A05) |
+| `SonicRouterNullTest` | `swift run -c release SonicRouterNullTest` (con SonicRouter abierto; pide permiso de captura); `--selftest` sin hardware | Prueba nula con audio real: residuo < −120 dBFS, mapa de canales y frecuencia estable (CAM-001-A03 a A05) |
 | Sanitizers | `swift run --sanitize=address --sanitize=undefined SonicRouterPolicyTests` | ASan y UBSan sobre las pruebas |
 | Compilación estricta | `swift build -Xswiftc -warnings-as-errors` | Ejecutada el 2026-11-18 en la rama de CAM-001: OK |
 
@@ -60,3 +61,21 @@ Evidencia del 2026-11-15, árbol de `e67f575` más cambios sin guardar, Xcode
 GitHub Actions en macOS: compilar con avisos como errores, `Scripts/test.sh`,
 sanitizers, `sdd-deriva.py --estricto`. No se ha creado: añadir un flujo de
 trabajo es un cambio en el repositorio que necesita visto bueno.
+
+## Herramientas que faltan (revisión del 2026-11-18)
+
+Ninguna existe todavía. Por orden de valor:
+
+| Herramienta | Para | ¿Sin cuenta ni hardware? |
+|---|---|---|
+| CI (`.github/workflows`): compilación estricta, `Scripts/test.sh`, ASan/UBSan, `sdd-deriva --estricto` | Plan A5, RIE-11 | Sí |
+| Prueba de que el módulo de audio no usa red ni escribe audio | SEG-01-R05 | Sí |
+| Verificador del paquete: entitlements firmados frente a `Config/`, arquitecturas, `Info.plist`, `plutil -lint` | SEG-01-R01, CAM-002 | Sí |
+| `PrivacyInfo.xcprivacy` y su validación | SEG-01-R03, plan A7 | Sí |
+| Script del arnés de CAM-002 (firma ad hoc, `log stream` del sandbox) | CAM-002 | Prepararlo sí; ejecutarlo no |
+| Prueba de migración de preferencias al contenedor | RIE-06, plan A8 | Sí, con dominio falso |
+| Detector de taps y agregados huérfanos | CAM-002-A17 | No |
+| Medición del callback (`os_signpost`, sobrecargas, p50/p99) | REN-01-R04, CAM-003 T6 | Instrumentar sí; medir no |
+| Sesión larga (8 h: sobrecargas, memoria, objetos de audio) | performance.md | No |
+| Scripts de archivo, subida y notarización | Plan B2–B4 | Esqueleto sí |
+| Formato y lint (swift-format, clang-format) | Compilación estricta | Sí |

@@ -62,7 +62,7 @@ Pendientes de escribir: specs de dispositivos (`CoreAudioClient.swift`,
 | `Sources/SonicRouterCore/OutputChannelMap.swift`, `MultiOutputPlan.swift` | A fondo |
 | `Sources/SonicRouterCore/RealtimeRender.swift` (nuevo, CAM-001) | A fondo |
 | `Sources/SonicRouterDSP/` (nuevo, CAM-003, C++) | A fondo |
-| `Tests/SonicRouterPolicyTests/SwiftReference.swift`, `Tests/SonicRouterBench/` (nuevos, CAM-003) | A fondo |
+| `Tests/SonicRouterPolicyTests/SwiftReference.swift`, `Tests/SonicRouterBench/` (nuevos, CAM-003), `Tests/SonicRouterNullTest/` (nuevo, CAM-001 T4) | A fondo |
 | `Sources/SonicRouter/LaunchAtLogin.swift`, `SonicRouterApp.swift` | A fondo |
 | `Sources/SonicRouter/ApplicationAudioStore.swift` | A fondo |
 | `Sources/SonicRouterCore/AudioControlPolicy.swift`, `ProfileArchive.swift` | A fondo |

@@ -45,6 +45,12 @@ let package = Package(
             name: "SonicRouterBench",
             dependencies: ["SonicRouterCore"],
             path: "Tests/SonicRouterBench"
+        ),
+        // Null test with real audio (CAM-001 T4): `swift run SonicRouterNullTest`.
+        // Needs the audio-capture permission; `--selftest` does not.
+        .executableTarget(
+            name: "SonicRouterNullTest",
+            path: "Tests/SonicRouterNullTest"
         )
     ],
     cxxLanguageStandard: .cxx20

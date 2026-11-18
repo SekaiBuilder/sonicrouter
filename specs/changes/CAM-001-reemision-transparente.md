@@ -60,8 +60,30 @@ lo que sale sea **la misma señal multiplicada por la ganancia**, y nada más.
    podido observar sin hardware. Se revisa con T4. `oneToOne` (canales
    iguales) queda preparado para el tap de flujo de dispositivo de T3; la
    mezcla estéreo actual se reparte con `OutputChannelMap` y no lo usa.
-3. Herramienta `SonicRouterNullTest`: genera la señal, monta el motor, captura
-   la re-emisión y da el residuo en dBFS. Es la medida de A03 a A05.
+3. Herramienta `SonicRouterNullTest` (`Tests/SonicRouterNullTest/`, escrita el
+   2026-11-18). Mide la app real, no una copia del motor:
+   - lanza un proceso hijo (el mismo binario, `emit`) que escribe ruido
+     determinista a −12 dBFS directamente en la salida predeterminada, un
+     flujo independiente por canal;
+   - espera a que el titular lo ponga al 99 % en SonicRouter (detecta la
+     salida del proceso `local.sonicrouter.app`);
+   - captura en un solo agregado privado y un solo IOProc dos taps sin
+     silenciar: el del emisor (referencia) y el de todo lo que llega al
+     dispositivo menos el emisor (re-emisión; `--capture process` toma solo
+     el proceso de SonicRouter). Mismo reloj, sin compensación de deriva;
+   - alinea por correlación, halla la ganancia Float exacta (o usa `--gain`)
+     y da por canal: canal de origen, retardo, muestras exactas, residuo de
+     pico y RMS en dBFS y clics (residuo > −60 dBFS);
+   - lee la frecuencia nominal antes, durante y después, y cuenta los
+     cambios con un listener (A05).
+   Pasa si cada canal llega a su canal, el residuo de pico queda por debajo
+   de −120 dBFS y la frecuencia no cambia. `--selftest` comprueba el análisis
+   con datos sintéticos, sin hardware ni permiso.
+   Supuestos sin comprobar: que un tap sin silenciar del emisor siga
+   recibiendo su audio mientras SonicRouter lo silencia, y que el tap del
+   dispositivo incluya la re-emisión que sale por el agregado de SonicRouter.
+   Si fallan, la herramienta lo dice («referencia en silencio» o
+   «re-emisión en silencio») y se prueba `--capture process`.
 
 ### Referencia externa (leída el 2026-11-15)
 
@@ -114,7 +136,7 @@ Por comprobar antes de dar el diseño por bueno:
 | T1 | Mover `StereoRender`, `GainBox` y `RealtimeGainLimiter` a `SonicRouterCore` y cubrir A01 y A02 | No — **hecho 2026-11-18** |
 | T2 | Comprobación de formato (R05, A06) | No — **hecho 2026-11-18** (la parte «la app suena por su ruta nativa» de A06 sigue sin probar con audio real) |
 | T3 | Tap de flujo de dispositivo y montaje sin deriva (R01–R03) | **Escrito 2026-11-18**; falta probarlo con el titular (T4, T5) |
-| T4 | `SonicRouterNullTest` (A03–A05) | Sí: permiso de captura de audio para el binario nuevo |
+| T4 | `SonicRouterNullTest` (A03–A05) | **Escrita 2026-11-18** y autoprueba en verde; ejecutarla necesita al titular (permiso de captura para Terminal) |
 | T5 | Escucha comparada (A07) y sesión larga | Sí |
 | T6 | Actualizar AUD-01, README y SECURITY | No |
 
@@ -138,9 +160,12 @@ Por comprobar antes de dar el diseño por bueno:
 | A04, parte lógica (mapa identidad; 6 canales intercalados a 6 planos, igual bit a bit; ganancia exacta en esa ruta) | `Scripts/test.sh` | commit de T3, misma rama | Xcode 27.2, Swift 6.4.2, macOS 27.2 arm64 | Pasa |
 | T3 compila sin avisos | `swift build -Xswiftc -warnings-as-errors` | ídem | ídem | OK |
 
+| T4: el análisis acepta la copia exacta y detecta los fallos (2 y 6 canales: retardo 517, ganancia 0,99 con y sin pista; ruido de −100 dBFS, canales cambiados, una trama perdida, mezcla a mono, referencia en silencio, ganancia distinta) | `swift run -c release SonicRouterNullTest --selftest` | commit de T4, misma rama | ídem | 15 de 15 pasan |
+| T4 compila sin avisos | `swift build -Xswiftc -warnings-as-errors` | ídem | ídem | OK |
+
 Total de `Scripts/test.sh`: 141 comprobaciones tras T3 (85 al empezar), todas pasan.
 
-No ejecutado: A03–A05 y A07 (necesitan T4 y al titular); el montaje de T3 con
+No ejecutado: A03–A05 y A07 (la herramienta existe; falta ejecutarla con el titular); el montaje de T3 con
 un dispositivo real (no se sabe aún si macOS crea el tap de flujo, ni si suena
 sin clics); A06 con un
 dispositivo real de formato no Float32; la app en marcha tras el cambio.

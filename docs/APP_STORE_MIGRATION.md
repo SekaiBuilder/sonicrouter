@@ -89,7 +89,7 @@ Rosetta 2; la app Intel no se ha ejecutado. Mantenerlo es
 |---|---|---|
 | A1 | Línea base de specs | En curso |
 | A2 | CAM-002: prueba de sandbox con firma ad hoc | Preparada; necesita al titular delante del Mac |
-| A3 | CAM-001: sonido transparente | Aprobado 2026-11-18; T1–T3 hechos; T4 y T5 necesitan al titular |
+| A3 | CAM-001: sonido transparente | Aprobado 2026-11-18; T1–T3 hechos; herramienta de T4 escrita; ejecutar T4 y T5 necesita al titular |
 | A4 | Arnés de medición y primera línea de referencia | Sin empezar |
 | A5 | Pruebas automáticas nuevas y CI | Sin empezar |
 | A6 | Proyecto Xcode que envuelva el paquete, catálogo de recursos con el icono, `Info.plist` versionado, String Catalogs | Sin empezar; necesita visto bueno (cambia la forma de compilar) |
