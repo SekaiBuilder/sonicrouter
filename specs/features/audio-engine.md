@@ -9,29 +9,31 @@ comprobado con audio real en esta línea base. La copia (R08, R09) y la
 comprobación de formato (R17) tienen además pruebas automáticas con búferes
 sintéticos desde CAM-001 (ver «Evidencia»).
 
-Números de línea actualizados el 2026-11-18, tras CAM-003 (núcleo en C++).
+Números de línea actualizados el 2026-11-18, tras CAM-003 (núcleo en C++) y
+CAM-001 T3 (tap de flujo de dispositivo). R03, R04 y R05 describen el código
+de T3, **leído y compilado pero sin probar con audio real**.
 
 ## Requisitos actuales
 
 | ID | Comportamiento | Fuente |
 |---|---|---|
 | AUD-01-R01 | Con volumen ≥ 99,9 %, salida predeterminada, EQ plano y sin mute, la app no tiene tap: suena por su ruta nativa | `AudioControlPolicy.swift:66`, `ApplicationAudioStore.swift:724` |
-| AUD-01-R02 | El mute (o volumen ≤ 0,1 %) crea un tap de mezcla estéreo `.muted`, un agregado privado con un solo dispositivo físico y un IOProc que escribe ceros | `AudioProcessTap.swift:513` |
-| AUD-01-R03 | Volumen por debajo de 99,9 %, salida elegida o EQ no plano crean el motor de re-emisión: tap de mezcla estéreo `.muted` y agregado privado con las salidas físicas y el tap | `AudioProcessTap.swift:659` |
-| AUD-01-R04 | El tap del motor de re-emisión lleva compensación de deriva a calidad máxima, siempre, también cuando re-emite en el mismo dispositivo en el que la app ya sonaba | `AudioProcessTap.swift:682`, `:246` |
-| AUD-01-R05 | Al crear un motor se cambia la frecuencia nominal de cada salida a la de la salida del sistema si la admite, y la del agregado a la de su reloj | `AudioProcessTap.swift:319` |
-| AUD-01-R06 | El motor de re-emisión pide 256 tramas de búfer al agregado | `AudioProcessTap.swift:695` |
+| AUD-01-R02 | El mute (o volumen ≤ 0,1 %) crea un tap de mezcla estéreo `.muted`, un agregado privado con un solo dispositivo físico y un IOProc que escribe ceros | `AudioProcessTap.swift:548` |
+| AUD-01-R03 | Volumen por debajo de 99,9 %, salida elegida o EQ no plano crean el motor de re-emisión con tap `.muted` y agregado privado con las salidas físicas y el tap. Desde CAM-001 T3 hay dos montajes: **flujo de dispositivo** cuando la salida es un único dispositivo físico con un solo flujo de salida y todos los procesos de la app suenan solo en él (`kAudioProcessPropertyDevices`): tap de ese flujo, canal a canal; si no, o si ese montaje falla, **mezcla estéreo** como antes. `SonicRouter.DisableDeviceStreamTap` en `UserDefaults` fuerza la mezcla estéreo | `AudioProcessTap.swift:718`, `:739`, `:748` |
+| AUD-01-R04 | El tap del montaje de mezcla estéreo lleva compensación de deriva a calidad máxima; el de flujo de dispositivo no lleva ninguna (mismo reloj, CAM-001-R02) | `AudioProcessTap.swift:782`, `:246` |
+| AUD-01-R05 | Solo el montaje de mezcla estéreo cambia la frecuencia nominal de cada salida a la de la salida del sistema si la admite. El montaje de flujo de dispositivo y el mute no tocan la frecuencia de ningún dispositivo físico; solo ponen la del agregado igual a la de su reloj (CAM-001 T3; antes el mute también la cambiaba) | `AudioProcessTap.swift:319`, `:469`, `:582`, `:795` |
+| AUD-01-R06 | El motor de re-emisión pide 256 tramas de búfer al agregado | `AudioProcessTap.swift:801` |
 | AUD-01-R07 | La ganancia aplicada es `deslizador × compensación`; el deslizador es lineal 0–1 y la compensación va de 0,5 a 8 (1,0 por defecto desde la clave `v5`) | `AudioProcessTap.swift:197`, `ApplicationAudioStore.swift:33`, `SonicRouterDSP.cpp:320` |
 | AUD-01-R08 | Con ganancia ≤ 1 no actúa el limitador. Por encima de 1, la ganancia se limita al margen del bloque (`1 / pico`) con recuperación suavizada | `SonicRouterDSP.cpp:353` |
 | AUD-01-R09 | Con un solo dispositivo y la misma disposición de búferes, la copia es `vDSP_vsmul`. Si no, L/R van a los dos primeros canales de cada dispositivo y el resto queda en silencio; desde CAM-003 cada canal se copia con `vDSP_vsmul` con saltos (antes, muestra a muestra) | `SonicRouterDSP.cpp:230`, `:276` |
 | AUD-01-R10 | El ecualizador (tres biquads en doble precisión y preamplificación) se aplica después de la ganancia; plano y asentado no toca las muestras | `SonicRouterDSP.cpp:104` |
-| AUD-01-R11 | Los filtros se calculan para la frecuencia del agregado al crear el motor y no se recalculan si cambia después | `AudioProcessTap.swift:710` |
+| AUD-01-R11 | Los filtros se calculan para la frecuencia del agregado al crear el motor y no se recalculan si cambia después | `AudioProcessTap.swift:830` |
 | AUD-01-R12 | Una salida que es un agregado se descompone en sus dispositivos físicos; el primero es el reloj y los demás llevan compensación de deriva | `AudioProcessTap.swift:289`, `:246` |
 | AUD-01-R13 | Una app en llamada nunca se re-emite | `ApplicationAudioStore.swift:650`, `:749` |
 | AUD-01-R14 | Al sustituir un motor de re-emisión, el anterior se para antes de arrancar el nuevo; al sustituir un motor de mute, el anterior se para después | `ApplicationAudioStore.swift:690`, `:641` |
-| AUD-01-R15 | Cualquier fallo al activar un motor ejecuta `invalidate()`, que para el IOProc y destruye agregado y tap | `AudioProcessTap.swift:573`, `:782` |
-| AUD-01-R16 | El callback no reserva memoria ni toma locks por diseño: atómicos sin bloqueo, estado reservado al crear el motor, vDSP. Desde CAM-003 es una función C (`sr_renderer_ioproc`) sobre estado C++ y no entra en el runtime de Swift | `SonicRouterDSP.cpp:183`, `:511`, `AudioProcessTap.swift:729` |
-| AUD-01-R17 | Antes de arrancar el IOProc, el motor de re-emisión lee el formato del tap y el formato virtual de cada flujo de salida del agregado. Si alguno no es Float32 lineal, empaquetado y en orden nativo, no arranca: destruye tap y agregado (la app vuelve a su ruta nativa) y el estado muestra «Formato de audio no admitido» en es/en/ja. Si un formato no se puede leer, arranca como antes y solo queda en el log (desde CAM-001, 2026-11-18) | `AudioProcessTap.swift:702`, `RealtimeRender.swift:80` |
+| AUD-01-R15 | Cualquier fallo al activar un motor ejecuta `invalidate()`, que para el IOProc y destruye agregado y tap | `AudioProcessTap.swift:609`, `:903` |
+| AUD-01-R16 | El callback no reserva memoria ni toma locks por diseño: atómicos sin bloqueo, estado reservado al crear el motor, vDSP. Desde CAM-003 es una función C (`sr_renderer_ioproc`) sobre estado C++ y no entra en el runtime de Swift | `SonicRouterDSP.cpp:183`, `:511`, `AudioProcessTap.swift:849` |
+| AUD-01-R17 | Antes de arrancar el IOProc, el motor de re-emisión lee el formato del tap y el formato virtual de cada flujo de salida del agregado. Si alguno no es Float32 lineal, empaquetado y en orden nativo (o, en flujo de dispositivo, si los canales no coinciden), no arranca ese montaje. En flujo de dispositivo se pasa a la mezcla estéreo; en mezcla estéreo se destruyen tap y agregado (la app vuelve a su ruta nativa) y el estado muestra «Formato de audio no admitido» en es/en/ja. Un formato ilegible: en mezcla estéreo arranca como antes y queda en el log; en flujo de dispositivo pasa a la mezcla estéreo | `AudioProcessTap.swift:811`, `RealtimeRender.swift:80` |
 
 ## Dónde deja de ser el sonido original
 
@@ -49,9 +51,10 @@ es la de la app. Etapas que la alteran, por orden:
 | 7 | Ecualizador en uso | Deliberado | Es la función |
 | 8 | Ruta a **otro** dispositivo | Dos relojes distintos: remuestrear es inevitable | No |
 
-Las etapas 1 a 4 son hipótesis razonadas del código, no mediciones. El cambio
-[CAM-001](../changes/CAM-001-reemision-transparente.md) las elimina y exige
-medirlo.
+Las etapas 1 a 4 son hipótesis razonadas del código, no mediciones. Desde
+CAM-001 T3 (2026-11-18) el montaje de flujo de dispositivo evita en el código
+las etapas 1 a 4 cuando la app vuelve a sonar en su mismo dispositivo; sigue
+sin medirse (CAM-001-A03 a A05) ni escucharse (A07).
 
 ## Brechas
 

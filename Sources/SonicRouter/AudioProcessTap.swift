@@ -464,6 +464,41 @@ private enum TapAggregate {
         return formats
     }
 
+    /// Sets only the aggregate's rate to its clock device's; physical
+    /// devices are left exactly as they are (CAM-001-R03).
+    static func followClockRate(aggregateID: AudioObjectID, outputs: [PhysicalOutput]) {
+        if let clock = outputs.first, let rate = nominalSampleRate(clock.id) {
+            setNominalSampleRate(rate, on: aggregateID)
+        }
+    }
+
+    static func outputStreamCount(_ deviceID: AudioObjectID) -> Int {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreams,
+            mScope: kAudioObjectPropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(deviceID, &address, 0, nil, &size) == noErr else { return 0 }
+        return Int(size) / MemoryLayout<AudioObjectID>.size
+    }
+
+    /// Devices a process object is playing on right now.
+    static func processOutputDevices(_ processObjectID: AudioObjectID) -> [AudioObjectID] {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioProcessPropertyDevices,
+            mScope: kAudioObjectPropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(processObjectID, &address, 0, nil, &size) == noErr, size > 0 else { return [] }
+        var ids = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+        let status = ids.withUnsafeMutableBufferPointer { buffer in
+            AudioObjectGetPropertyData(processObjectID, &address, 0, nil, &size, buffer.baseAddress!)
+        }
+        return status == noErr ? ids.filter { $0 != kAudioObjectUnknown } : []
+    }
+
     static func nominalSampleRate(_ deviceID: AudioObjectID) -> Float64? {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyNominalSampleRate,
@@ -543,7 +578,8 @@ final class MuteEngine {
             throw TapError.coreAudio(.createMuteDevice, aggStatus)
         }
         aggregateID = newAggregate
-        TapAggregate.alignSampleRates(aggregateID: aggregateID, outputs: clock)
+        // Mute emits silence: no reason to change any hardware rate.
+        TapAggregate.followClockRate(aggregateID: aggregateID, outputs: clock)
 
         let ioBlock: AudioDeviceIOBlock = { _, _, _, outputData, _ in
             let outList = UnsafeMutableAudioBufferListPointer(outputData)
@@ -592,9 +628,10 @@ final class MuteEngine {
 // MARK: - Volume engine
 
 /// Per-app volume, route and equalizer. The original process path is fully
-/// muted, leaving exactly one audible copy: the signal re-emitted here. Drift
-/// compensation stays enabled because the tap clock is not guaranteed to match
-/// the output clock.
+/// muted, leaving exactly one audible copy: the signal re-emitted here. On the
+/// device the app already plays on, the engine taps that device stream with no
+/// drift compensation and no resampling (CAM-001); routed elsewhere, it taps a
+/// stereo mixdown with drift compensation, because the clocks differ.
 final class AppVolumeTap {
     let pid: pid_t
     let processObjectIDs: [AudioObjectID]
@@ -656,14 +693,73 @@ final class AppVolumeTap {
         }
     }
 
+    /// How the engine taps the app. `deviceStream` is the transparent path
+    /// (CAM-001): the app's audio for one device stream, at that stream's
+    /// format and clock, re-emitted on the same device channel for channel.
+    enum TapMode: CustomStringConvertible {
+        case deviceStream(channels: Int)
+        case stereoMixdown
+
+        var description: String {
+            switch self {
+            case let .deviceStream(channels): "device stream (\(channels) ch, no drift compensation)"
+            case .stereoMixdown: "stereo mixdown (drift compensation)"
+            }
+        }
+    }
+
+    /// Hidden switch to force the previous stereo-mixdown engine, for A/B
+    /// listening (CAM-001 T5): `defaults write local.sonicrouter.app
+    /// SonicRouter.DisableDeviceStreamTap -bool YES`.
+    static let disableDeviceStreamKey = "SonicRouter.DisableDeviceStreamTap"
+
+    private(set) var mode: TapMode?
+
     func activate() throws {
+        let outputs = TapAggregate.physicalOutputs(uid: outputUID, id: outputDeviceID)
+        if !UserDefaults.standard.bool(forKey: Self.disableDeviceStreamKey),
+           let channels = sameDeviceStreamChannels(outputs: outputs) {
+            do {
+                try start(mode: .deviceStream(channels: channels), outputs: outputs)
+                return
+            } catch {
+                // Not fatal: the stereo mixdown below is the engine that has
+                // always worked. Clean up whatever the attempt created first.
+                tapLog.notice("Device-stream tap unavailable for pid \(self.pid): \(error.localizedDescription, privacy: .public); using stereo mixdown")
+                invalidate()
+            }
+        }
+        try start(mode: .stereoMixdown, outputs: outputs)
+    }
+
+    /// The device's output channel count when the app can be re-emitted on the
+    /// very device it already plays on (CAM-001-R01): one physical output that
+    /// is not an aggregate, with a single output stream, and every process of
+    /// the app currently playing on it and nowhere else. Otherwise nil.
+    private func sameDeviceStreamChannels(outputs: [TapAggregate.PhysicalOutput]) -> Int? {
+        guard outputs.count == 1, outputs[0].id == outputDeviceID,
+              TapAggregate.outputStreamCount(outputDeviceID) == 1 else { return nil }
+        let playingOn = Set(processObjectIDs.flatMap(TapAggregate.processOutputDevices))
+        guard playingOn == [outputDeviceID] else { return nil }
+        let channels = TapAggregate.outputChannelCount(outputDeviceID)
+        return channels > 0 ? channels : nil
+    }
+
+    private func start(mode: TapMode, outputs: [TapAggregate.PhysicalOutput]) throws {
         let uuid = UUID()
-        let description = CATapDescription(stereoMixdownOfProcesses: processObjectIDs)
+        let description: CATapDescription
+        switch mode {
+        case .deviceStream:
+            description = CATapDescription(processes: processObjectIDs, deviceUID: outputUID, stream: 0)
+            description.isMixdown = false
+        case .stereoMixdown:
+            description = CATapDescription(stereoMixdownOfProcesses: processObjectIDs)
+            description.isMixdown = true
+        }
         description.uuid = uuid
         description.name = "SonicRouter volume · \(pid)"
         description.isPrivate = true
         description.isExclusive = false
-        description.isMixdown = true
         description.muteBehavior = .muted
 
         var newTap = AudioObjectID(kAudioObjectUnknown)
@@ -673,13 +769,17 @@ final class AppVolumeTap {
         }
         tapID = newTap
 
-        let outputs = TapAggregate.physicalOutputs(uid: outputUID, id: outputDeviceID)
+        let isDeviceStream: Bool
+        if case .deviceStream = mode { isDeviceStream = true } else { isDeviceStream = false }
+
+        // Same device: tap and output share the device clock, so the tap
+        // needs no drift compensation and nothing is resampled (CAM-001-R02).
         let composition = TapAggregate.composition(
             name: "SonicRouter Volume \(pid)",
             uid: "local.sonicrouter.agg.vol.\(uuid.uuidString)",
             outputs: outputs,
             tapUID: TapAggregate.tapUID(tapID, fallback: uuid),
-            tapDriftCompensation: true
+            tapDriftCompensation: !isDeviceStream
         )
 
         var newAggregate = AudioObjectID(kAudioObjectUnknown)
@@ -689,23 +789,43 @@ final class AppVolumeTap {
             throw TapError.coreAudio(.createVolumeDevice, aggStatus)
         }
         aggregateID = newAggregate
-        TapAggregate.alignSampleRates(aggregateID: aggregateID, outputs: outputs)
+        if isDeviceStream {
+            // Never touch the hardware rate on the same device (CAM-001-R03):
+            // the aggregate simply follows the device it wraps.
+            TapAggregate.followClockRate(aggregateID: aggregateID, outputs: outputs)
+        } else {
+            TapAggregate.alignSampleRates(aggregateID: aggregateID, outputs: outputs)
+        }
         // 256 frames (~5 ms) cut the measured tap → speaker delay from ~66 ms
         // to ~50 ms; 128 gained only a few ms more at a higher CPU cost.
         TapAggregate.setBufferFrameSize(256, on: aggregateID)
+
         // The renderer copies raw Float32: refuse to start on anything else
         // rather than play it as noise. Destroying the tap gives the app its
-        // native path back. A format that cannot be read is logged and allowed,
-        // as before this check existed.
-        if let tapFormat = TapAggregate.tapFormat(tapID),
-           let outputFormats = TapAggregate.outputStreamFormats(aggregateID),
-           let problem = RenderFormatCheck.problem(tap: tapFormat, outputs: outputFormats) {
-            tapLog.error("Volume engine refused for pid \(self.pid): unsupported format \(String(describing: problem), privacy: .public)")
+        // native path back. In the mixdown engine a format that cannot be read
+        // is logged and allowed, as before this check existed; the device-stream
+        // engine must know its channels, so there it falls back instead.
+        let tapFormat = TapAggregate.tapFormat(tapID)
+        let outputFormats = TapAggregate.outputStreamFormats(aggregateID)
+        if let tapFormat, let outputFormats,
+           let problem = RenderFormatCheck.problem(tap: tapFormat, outputs: outputFormats, oneToOne: isDeviceStream) {
+            tapLog.error("Volume engine (\(mode.description, privacy: .public)) refused for pid \(self.pid): \(String(describing: problem), privacy: .public)")
             logStreamFormats()
             invalidate()
             throw TapError.unsupportedFormat(problem)
         }
-        let channelMap = OutputChannelMap(deviceChannelCounts: outputs.map { TapAggregate.outputChannelCount($0.id) })
+        if isDeviceStream, tapFormat == nil || outputFormats == nil {
+            invalidate()
+            throw TapError.coreAudio(.prepareVolume, kAudioHardwareUnspecifiedError)
+        }
+
+        let channelMap: OutputChannelMap
+        switch mode {
+        case let .deviceStream(channels):
+            channelMap = OutputChannelMap(identityChannels: channels)
+        case .stereoMixdown:
+            channelMap = OutputChannelMap(deviceChannelCounts: outputs.map { TapAggregate.outputChannelCount($0.id) })
+        }
         // The equalizer's filters are designed for the rate the IOProc runs at.
         let sampleRate = TapAggregate.nominalSampleRate(aggregateID)
             ?? TapAggregate.nominalSampleRate(outputDeviceID)
@@ -738,7 +858,8 @@ final class AppVolumeTap {
             invalidate()
             throw TapError.coreAudio(.startVolume, startStatus)
         }
-        tapLog.notice("Volume engine active for pid \(self.pid) on \(outputs.count) device(s) at \(sampleRate) Hz")
+        self.mode = mode
+        tapLog.notice("Volume engine active for pid \(self.pid): \(mode.description, privacy: .public), \(outputs.count) device(s) at \(sampleRate) Hz")
         logStreamFormats()
     }
 
@@ -795,5 +916,6 @@ final class AppVolumeTap {
         }
         // Only now, with the IOProc gone, may the C++ state it reads be freed.
         renderer = nil
+        mode = nil
     }
 }

@@ -12,7 +12,7 @@ verificación**.
 |---|---|
 | Diagnóstico | Hecho |
 | Línea base de specs | En curso: faltan dispositivos e interfaz |
-| Sonido transparente ([CAM-001](../specs/changes/CAM-001-reemision-transparente.md)) | Aprobado; T1 y T2 hechos en `feature/cam-001-reemision-transparente` |
+| Sonido transparente ([CAM-001](../specs/changes/CAM-001-reemision-transparente.md)) | Aprobado; T1–T3 hechos en `feature/cam-001-reemision-transparente`; falta la prueba con audio real |
 | Prueba de sandbox ([CAM-002](../specs/changes/CAM-002-prueba-app-sandbox.md)) | Preparada, sin ejecutar |
 | Mediciones de referencia | Plan escrito ([performance.md](../specs/performance.md)) |
 | Evaluación de lenguajes | Núcleo de tiempo real en C++ ([CAM-003](../specs/changes/CAM-003-nucleo-tiempo-real-cpp.md), DEC-007); el resto en Swift ([languages.md](../specs/decisions/languages.md)) |
@@ -89,7 +89,7 @@ Rosetta 2; la app Intel no se ha ejecutado. Mantenerlo es
 |---|---|---|
 | A1 | Línea base de specs | En curso |
 | A2 | CAM-002: prueba de sandbox con firma ad hoc | Preparada; necesita al titular delante del Mac |
-| A3 | CAM-001: sonido transparente | Aprobado 2026-11-18; T1 y T2 hechos; T3 sigue (se escribe sin hardware, se prueba con el titular) |
+| A3 | CAM-001: sonido transparente | Aprobado 2026-11-18; T1–T3 hechos; T4 y T5 necesitan al titular |
 | A4 | Arnés de medición y primera línea de referencia | Sin empezar |
 | A5 | Pruebas automáticas nuevas y CI | Sin empezar |
 | A6 | Proyecto Xcode que envuelva el paquete, catálogo de recursos con el icono, `Info.plist` versionado, String Catalogs | Sin empezar; necesita visto bueno (cambia la forma de compilar) |

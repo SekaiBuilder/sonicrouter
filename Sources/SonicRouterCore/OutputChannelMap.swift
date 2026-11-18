@@ -20,6 +20,14 @@ public final class OutputChannelMap: @unchecked Sendable {
             : counts.flatMap { count in (0..<count).map { $0 < 2 ? $0 : -1 } }
     }
 
+    /// One device fed channel for channel from a tap of its own stream
+    /// (CAM-001-R01): output channel i takes tapped channel i, nothing is
+    /// dropped or duplicated.
+    public init(identityChannels channels: Int) {
+        deviceCount = 1
+        sources = Array(0..<max(1, channels))
+    }
+
     /// The tapped channel for an output channel, or -1 for silence.
     public func source(forOutputChannel channel: Int) -> Int {
         channel < sources.count ? sources[channel] : -1

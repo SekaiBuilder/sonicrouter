@@ -1,7 +1,7 @@
 # CAM-001 — Re-emisión transparente
 
-Estado: **aprobado por el titular el 2026-11-18; T1 y T2 hechos**, T3–T6
-pendientes. Rama: `feature/cam-001-reemision-transparente`. Fecha: 2026-11-15.
+Estado: **aprobado por el titular el 2026-11-18; T1, T2 y T3 hechos** (T3
+solo compilado y probado con búferes sintéticos); T4–T6 pendientes. Rama: `feature/cam-001-reemision-transparente`. Fecha: 2026-11-15.
 Origen: el titular pide que el sonido sea siempre el original, sin
 deformación ni pérdida de claridad ([DEC-006](../decisions/README.md)).
 Afecta a: [AUD-01](../features/audio-engine.md).
@@ -79,6 +79,25 @@ Consecuencia para el diseño: la regla «sin deriva en el mismo dispositivo»
 Bluetooth) con la prueba de residuo, no darla por universal. Su licencia es
 GPL-3.0: sirve de referencia, no se copia código.
 
+Decisiones de T3 (2026-11-18):
+
+- «Mismo dispositivo» exige: una sola salida física (no un agregado ni un
+  multi-salida), con un solo flujo de salida, y que la unión de los
+  dispositivos de salida de todos los procesos de la app sea exactamente ese
+  dispositivo. Si un proceso aún no suena en ningún sitio, no se cumple y se
+  usa la mezcla estéreo (el montaje que ya funcionaba).
+- Si el tap de flujo no se puede crear, su formato no es Float32, sus canales
+  no casan con la salida o no se pueden leer, se pasa a la mezcla estéreo en
+  vez de dejar la app sin control (como hace FineTune). R05 se aplica tal
+  cual a la mezcla estéreo.
+- El agregado sigue la frecuencia del dispositivo; el hardware no se toca. El
+  motor de mute, que solo emite silencio, tampoco la cambia ya.
+- Interruptor oculto para comparar de oído con el montaje anterior:
+  `defaults write local.sonicrouter.app SonicRouter.DisableDeviceStreamTap -bool YES`
+  (y `defaults delete … SonicRouter.DisableDeviceStreamTap` para volver).
+- La copia en ese montaje usa `OutputChannelMap(identityChannels:)`: canal i
+  a canal i, sin mezcla.
+
 Por comprobar antes de dar el diseño por bueno:
 
 - `[POR ACLARAR: ¿un tap de flujo de dispositivo sin compensación de deriva se
@@ -94,7 +113,7 @@ Por comprobar antes de dar el diseño por bueno:
 |---|---|---|
 | T1 | Mover `StereoRender`, `GainBox` y `RealtimeGainLimiter` a `SonicRouterCore` y cubrir A01 y A02 | No — **hecho 2026-11-18** |
 | T2 | Comprobación de formato (R05, A06) | No — **hecho 2026-11-18** (la parte «la app suena por su ruta nativa» de A06 sigue sin probar con audio real) |
-| T3 | Tap de flujo de dispositivo y montaje sin deriva (R01–R03) | No para escribirlo; sí para probarlo |
+| T3 | Tap de flujo de dispositivo y montaje sin deriva (R01–R03) | **Escrito 2026-11-18**; falta probarlo con el titular (T4, T5) |
 | T4 | `SonicRouterNullTest` (A03–A05) | Sí: permiso de captura de audio para el binario nuevo |
 | T5 | Escucha comparada (A07) y sesión larga | Sí |
 | T6 | Actualizar AUD-01, README y SECURITY | No |
@@ -116,7 +135,12 @@ Por comprobar antes de dar el diseño por bueno:
 | Las pruebas detectan un error | Mutación temporal: escalar × 1,000001 en la copia rápida | sin commit (revertida) | Xcode 27.2, Swift 6.4.2, macOS 27.2 arm64 | 5 fallos A01/A02, como se espera |
 | Compilación estricta | `swift build -Xswiftc -warnings-as-errors` | ídem | Xcode 27.2, Swift 6.4.2, macOS 27.2 arm64 | OK |
 
-Total de `Scripts/test.sh`: 111 comprobaciones (85 antes), todas pasan.
+| A04, parte lógica (mapa identidad; 6 canales intercalados a 6 planos, igual bit a bit; ganancia exacta en esa ruta) | `Scripts/test.sh` | commit de T3, misma rama | Xcode 27.2, Swift 6.4.2, macOS 27.2 arm64 | Pasa |
+| T3 compila sin avisos | `swift build -Xswiftc -warnings-as-errors` | ídem | ídem | OK |
 
-No ejecutado: A03–A05 y A07 (necesitan T3, T4 y al titular); A06 con un
+Total de `Scripts/test.sh`: 141 comprobaciones tras T3 (85 al empezar), todas pasan.
+
+No ejecutado: A03–A05 y A07 (necesitan T4 y al titular); el montaje de T3 con
+un dispositivo real (no se sabe aún si macOS crea el tap de flujo, ni si suena
+sin clics); A06 con un
 dispositivo real de formato no Float32; la app en marcha tras el cambio.

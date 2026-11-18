@@ -677,6 +677,35 @@ private func runRenderFormatCheckTests(_ tests: inout TestState) {
     )
 }
 
+// MARK: - CAM-001 T3: device-stream engine renders channel for channel
+
+private func runDeviceStreamMapTests(_ tests: inout TestState) {
+    let identity = OutputChannelMap(identityChannels: 6)
+    tests.expect(identity.deviceCount == 1, "CAM-001-R01: identity map must be one device")
+    tests.expect((0..<7).map(identity.source(forOutputChannel:)) == [0, 1, 2, 3, 4, 5, -1], "CAM-001-R01: identity map must send channel i to channel i")
+    tests.expect(OutputChannelMap(identityChannels: 0).sources == [0], "Identity map must keep at least one channel")
+
+    let frames = 256
+    let surround = renderTestSamples(count: 6 * frames, seed: 51)
+    let input = TestBufferList(layout: [6], frames: frames, samples: [surround])
+
+    // Interleaved 6 → planar 6×1: the mapped path, every channel to its own.
+    let planarOut = TestBufferList(layout: [1, 1, 1, 1, 1, 1], frames: frames)
+    render(input: input, output: planarOut, gain: 1, channelMap: identity)
+    var allExact = true
+    for channel in 0..<6 {
+        let expected = stride(from: channel, to: surround.count, by: 6).map { surround[$0] }
+        if bits(planarOut.samples(channel)) != bits(expected) { allExact = false }
+    }
+    tests.expect(allExact, "CAM-001-A04 (logic): six channels must reach their own channel bit-exact, no mixdown")
+
+    // Gain on the mapped path stays an exact multiply too.
+    let scaled = TestBufferList(layout: [1, 1, 1, 1, 1, 1], frames: frames)
+    render(input: input, output: scaled, gain: 0.5, channelMap: identity)
+    let expectedFront = stride(from: 0, to: surround.count, by: 6).map { surround[$0] * 0.5 }
+    tests.expect(bits(scaled.samples(0)) == bits(expectedFront), "CAM-001-R04: mapped identity path must be exactly input × g")
+}
+
 // MARK: - CAM-003: C++ core equals the previous Swift path bit for bit
 
 private func runCppEquivalenceTests(_ tests: inout TestState) {
@@ -797,6 +826,7 @@ runMultiOutputPlanTests(&tests)
 runOutputChannelMapTests(&tests)
 runRealtimeRenderTests(&tests)
 runRenderFormatCheckTests(&tests)
+runDeviceStreamMapTests(&tests)
 runCppEquivalenceTests(&tests)
 
 if tests.failures.isEmpty {

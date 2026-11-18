@@ -43,7 +43,7 @@ dependencia nuevos, retirar o degradar una función, publicar.
 | [risks.md](risks.md) | `RIE-NN` Registro de riesgos | Primera versión |
 | [decisions/README.md](decisions/README.md) | Decisiones registradas y abiertas | Primera versión |
 | [decisions/languages.md](decisions/languages.md) | Evaluación Swift / Rust / C++ | Preliminar, sin mediciones |
-| [changes/CAM-001-reemision-transparente.md](changes/CAM-001-reemision-transparente.md) | Sonido sin alteración en la re-emisión | Aprobado; T1 y T2 hechos en su rama |
+| [changes/CAM-001-reemision-transparente.md](changes/CAM-001-reemision-transparente.md) | Sonido sin alteración en la re-emisión | Aprobado; T1–T3 hechos en su rama, sin probar con audio real |
 | [changes/CAM-003-nucleo-tiempo-real-cpp.md](changes/CAM-003-nucleo-tiempo-real-cpp.md) | Núcleo de tiempo real en C++ | Hecho; sin probar con audio real |
 | [changes/CAM-002-prueba-app-sandbox.md](changes/CAM-002-prueba-app-sandbox.md) | Prueba mínima con App Sandbox | Preparada, sin ejecutar |
 | [../docs/APP_STORE_MIGRATION.md](../docs/APP_STORE_MIGRATION.md) | Seguimiento de la migración a la tienda | En curso |
