@@ -47,6 +47,7 @@ else
   cp "$BUILD_DIR/$APP_NAME" "$MACOS_DIR/$APP_NAME"
 fi
 cp "$ICON_FILE" "$RESOURCES_DIR/AppIcon.icns"
+cp "$ROOT_DIR/Config/PrivacyInfo.xcprivacy" "$RESOURCES_DIR/PrivacyInfo.xcprivacy"
 
 cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

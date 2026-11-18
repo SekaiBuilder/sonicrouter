@@ -14,7 +14,7 @@ Fecha: 2026-11-15. Probabilidad e impacto: alta, media, baja.
 | RIE-08 | Reservas ocultas en el callback provocan cortes bajo carga | Baja (desde CAM-003) | Medio | IOProc en C sin Swift (CAM-003); falta medir en Mac real (AUD-01-B02) |
 | RIE-09 | Cambiar la frecuencia del hardware o la salida del sistema molesta al usuario o a la revisión | Media | Medio | CAM-001 lo elimina en el caso común; documentar el resto |
 | RIE-10 | Mantener Intel sin un Mac Intel donde probar | Alta | Bajo | Decidir DEC-102 |
-| RIE-11 | Las specs se quedan atrás del código | Media | Medio | Spec en el mismo commit; `sdd-deriva.py --estricto` en CI |
+| RIE-11 | Las specs se quedan atrás del código | Media | Medio | Spec en el mismo commit; `sdd-deriva.py --estricto` en `Scripts/ci.sh` y en la CI de GitHub (escrita 2026-11-18, sin ejecutar allí) |
 | RIE-12 | Trabajo sin guardar en `feature/native-multi-output` (5 archivos) | — | Alto | Guardarlo antes de cualquier cambio de código |
 | RIE-13 | Dos canales divergen | Baja | Medio | Un solo código; diferencias tras condición de compilación |
 | RIE-14 | Un error de memoria en el núcleo C++ (CAM-003) que Swift no atraparía | Baja | Alto | Interfaz C pequeña, sin punteros guardados, ASan + UBSan en las pruebas, oráculo Swift bit a bit |

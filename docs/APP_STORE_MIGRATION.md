@@ -91,9 +91,9 @@ Rosetta 2; la app Intel no se ha ejecutado. Mantenerlo es
 | A2 | CAM-002: prueba de sandbox con firma ad hoc | Preparada; necesita al titular delante del Mac |
 | A3 | CAM-001: sonido transparente | Aprobado 2026-11-18; T1–T3 hechos; herramienta de T4 escrita; ejecutar T4 y T5 necesita al titular |
 | A4 | Arnés de medición y primera línea de referencia | Sin empezar |
-| A5 | Pruebas automáticas nuevas y CI | Sin empezar |
+| A5 | Pruebas automáticas nuevas y CI | CI escrita (`Scripts/ci.sh`, `.github/workflows/ci.yml`), pasa en local; sin ejecutar en GitHub. Verificador del paquete `Scripts/verify-app.sh` |
 | A6 | Proyecto Xcode que envuelva el paquete, catálogo de recursos con el icono, `Info.plist` versionado, String Catalogs | Sin empezar; necesita visto bueno (cambia la forma de compilar) |
-| A7 | Manifiesto de privacidad | Sin empezar |
+| A7 | Manifiesto de privacidad | Hecho: `Config/PrivacyInfo.xcprivacy`, dentro del paquete |
 | A8 | Migración de preferencias al contenedor | Sin empezar |
 | A9 | Textos de la ficha en es/en/ja, notas de revisión, política de privacidad | Borrador en [`docs/store/metadata.md`](store/metadata.md) |
 | A10 | Capturas de pantalla | Sin empezar; necesita la app en marcha |

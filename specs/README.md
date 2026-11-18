@@ -70,6 +70,8 @@ Pendientes de escribir: specs de dispositivos (`CoreAudioClient.swift`,
 | `Sources/SonicRouterCore/Equalizer.swift` | A fondo (2026-11-18, al pasarlo a C++) |
 | `Tests/SonicRouterPolicyTests/main.swift` | Por estructura; a fondo solo las pruebas de mapa de canales y de CAM-001 |
 | `Package.swift`, `Scripts/build-app.sh`, `Scripts/test.sh`, README, SECURITY, CONTRIBUTING, roadmap | A fondo |
+| `Scripts/ci.sh`, `Scripts/check-security.sh`, `Scripts/verify-app.sh`, `.github/workflows/ci.yml`, `Config/PrivacyInfo.xcprivacy` (nuevos, 2026-11-18) | A fondo (ver [testing.md](testing.md)) |
+| `Scripts/sdd-deriva.py` | Copia literal del script de la skill `sdd`, para la CI |
 | Resto de `Sources/` y `Tests/` | No leído o solo por nombres |
 
 ## Identificadores

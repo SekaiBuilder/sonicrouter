@@ -9,9 +9,12 @@
 | `SonicRouterNullTest` | `swift run -c release SonicRouterNullTest` (con SonicRouter abierto; pide permiso de captura); `--selftest` sin hardware | Prueba nula con audio real: residuo < −120 dBFS, mapa de canales y frecuencia estable (CAM-001-A03 a A05) |
 | Sanitizers | `swift run --sanitize=address --sanitize=undefined SonicRouterPolicyTests` | ASan y UBSan sobre las pruebas |
 | Compilación estricta | `swift build -Xswiftc -warnings-as-errors` | Ejecutada el 2026-11-18 en la rama de CAM-001: OK |
+| Seguridad estática | `Scripts/check-security.sh` (`--selftest`) | SEG-01-R05: sin red en `Sources/`, sin escritura de archivos en el audio |
+| Verificación del paquete | `Scripts/verify-app.sh [app] [--arm64-only] [--store]` | `Info.plist` y textos del permiso en es/en/ja, icono, `PrivacyInfo.xcprivacy` (SEG-01-R03), arquitecturas, macOS mínimo, firma estricta; con `--store`, firma con identidad, Hardened Runtime y entitlements iguales a `Config/SonicRouter-MAS.entitlements` |
+| Todo lo anterior junto | `Scripts/ci.sh`; en GitHub, `.github/workflows/ci.yml` lo ejecuta en cada push y PR | Specs (`Scripts/sdd-deriva.py --estricto`, copia del script de la skill `sdd`), seguridad, compilación estricta, pruebas en debug, release y ASan/UBSan, autoprueba de la prueba nula, paquete universal y su verificación |
 
 Sin cobertura: motor de audio, clientes Core Audio, stores, interfaz, atajos,
-inicio de sesión. Sin CI.
+inicio de sesión. La CI está escrita pero **no se ha ejecutado en GitHub** (no hay push); `Scripts/ci.sh` pasa en local.
 
 Evidencia del 2026-11-15, árbol de `e67f575` más cambios sin guardar, Xcode
 27.2 / Swift 6.4.2 / macOS 27.2 arm64:
@@ -23,6 +26,8 @@ Evidencia del 2026-11-15, árbol de `e67f575` más cambios sin guardar, Xcode
 | `Scripts/test.sh` (2026-11-18, rama `feature/cam-001-reemision-transparente`) | 111 comprobaciones, todas pasan |
 | `Scripts/test.sh`, release y ASan + UBSan (2026-11-18, CAM-003) | 136 comprobaciones, todas pasan |
 | `Scripts/test.sh` (2026-11-18, CAM-001 T3) | 141 comprobaciones, todas pasan |
+| `Scripts/ci.sh` (2026-11-18, commit de la CI, misma rama, Apple M5) | Todo pasa en 30 s |
+| `Scripts/verify-app.sh --store` sobre el paquete ad hoc | Falla como debe (ad hoc, sin Runtime, sin entitlements); sobre una copia firmada con Runtime y los entitlements de `Config/`, solo falla «ad hoc» |
 | `swift build -c release --triple x86_64-apple-macosx15.0 --product SonicRouter` (en carpeta temporal) | Compila. El binario Intel no se ha ejecutado |
 
 ## Estrategia objetivo
@@ -64,14 +69,14 @@ trabajo es un cambio en el repositorio que necesita visto bueno.
 
 ## Herramientas que faltan (revisión del 2026-11-18)
 
-Ninguna existe todavía. Por orden de valor:
+Por orden de valor (tachadas las ya hechas):
 
 | Herramienta | Para | ¿Sin cuenta ni hardware? |
 |---|---|---|
-| CI (`.github/workflows`): compilación estricta, `Scripts/test.sh`, ASan/UBSan, `sdd-deriva --estricto` | Plan A5, RIE-11 | Sí |
-| Prueba de que el módulo de audio no usa red ni escribe audio | SEG-01-R05 | Sí |
-| Verificador del paquete: entitlements firmados frente a `Config/`, arquitecturas, `Info.plist`, `plutil -lint` | SEG-01-R01, CAM-002 | Sí |
-| `PrivacyInfo.xcprivacy` y su validación | SEG-01-R03, plan A7 | Sí |
+| ~~CI~~ | Hecho 2026-11-18 (`Scripts/ci.sh`, `.github/workflows/ci.yml`) | — |
+| ~~Prueba sin red ni escritura~~ | Hecho 2026-11-18 (`Scripts/check-security.sh`) | — |
+| ~~Verificador del paquete~~ | Hecho 2026-11-18 (`Scripts/verify-app.sh`) | — |
+| ~~`PrivacyInfo.xcprivacy`~~ | Hecho 2026-11-18 (`Config/PrivacyInfo.xcprivacy`) | — |
 | Script del arnés de CAM-002 (firma ad hoc, `log stream` del sandbox) | CAM-002 | Prepararlo sí; ejecutarlo no |
 | Prueba de migración de preferencias al contenedor | RIE-06, plan A8 | Sí, con dominio falso |
 | Detector de taps y agregados huérfanos | CAM-002-A17 | No |
