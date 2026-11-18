@@ -76,8 +76,9 @@ Objetivo: **un solo código**. Si CAM-002 muestra que alguna función no cabe en
 el sandbox, se aísla tras un protocolo y una condición de compilación; no dos
 apps.
 
-Arquitecturas: la tienda no exige Intel. El código compila para x86_64 con
-Xcode 27.2 (comprobado el 2026-11-15, sin ejecutar el binario). Mantenerlo es
+Arquitecturas: la tienda no exige Intel. `Scripts/build-app.sh` genera el
+paquete universal (arreglado el 2026-11-18) y las pruebas pasan en Intel bajo
+Rosetta 2; la app Intel no se ha ejecutado. Mantenerlo es
 [DEC-102](../specs/decisions/README.md).
 
 ## Tareas

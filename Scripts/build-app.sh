@@ -15,10 +15,17 @@ UNIVERSAL_BUILD="${SONICROUTER_UNIVERSAL:-1}"
 if [[ "$UNIVERSAL_BUILD" == "1" ]]; then
   ARM_BUILD_ARGS=(-c "$CONFIGURATION" --triple arm64-apple-macosx15.0)
   INTEL_BUILD_ARGS=(-c "$CONFIGURATION" --triple x86_64-apple-macosx15.0)
+  # Newer SwiftPM build systems give both triples the same bin path, so each
+  # binary is copied aside before the next build overwrites it.
+  ARCH_DIR="$ROOT_DIR/build/arch"
+  rm -rf "$ARCH_DIR"
+  mkdir -p "$ARCH_DIR/arm64" "$ARCH_DIR/x86_64"
   swift build "${ARM_BUILD_ARGS[@]}" --product "$APP_NAME"
-  ARM_BUILD_DIR="$(swift build "${ARM_BUILD_ARGS[@]}" --show-bin-path)"
+  cp "$(swift build "${ARM_BUILD_ARGS[@]}" --show-bin-path)/$APP_NAME" "$ARCH_DIR/arm64/$APP_NAME"
   swift build "${INTEL_BUILD_ARGS[@]}" --product "$APP_NAME"
-  INTEL_BUILD_DIR="$(swift build "${INTEL_BUILD_ARGS[@]}" --show-bin-path)"
+  cp "$(swift build "${INTEL_BUILD_ARGS[@]}" --show-bin-path)/$APP_NAME" "$ARCH_DIR/x86_64/$APP_NAME"
+  ARM_BUILD_DIR="$ARCH_DIR/arm64"
+  INTEL_BUILD_DIR="$ARCH_DIR/x86_64"
 else
   SWIFT_BUILD_ARGS=(-c "$CONFIGURATION")
   swift build "${SWIFT_BUILD_ARGS[@]}" --product "$APP_NAME"

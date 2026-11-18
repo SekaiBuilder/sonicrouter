@@ -86,6 +86,7 @@ de `SECURITY.md` (ya existían).
 | Compila | `swift build` | `e67f575` + cambios sin guardar | Xcode 27.2, Swift 6.4.2, macOS 27.2, arm64 | OK |
 | Pruebas de lógica pura | `Scripts/test.sh` | ídem | ídem | 85 comprobaciones, todas pasan |
 
+| Paquete universal y pruebas en Intel (Rosetta 2) | `Scripts/build-app.sh`; `arch -x86_64` sobre `SonicRouterPolicyTests` x86_64 | commit del arreglo de `build-app.sh` | ídem | `x86_64 arm64`, firma válida; 136 pasan en Intel. App no abierta |
 | Núcleo C++ igual bit a bit a Swift, ASan + UBSan, rendimiento (CAM-003) | `Scripts/test.sh`, `swift run -c release SonicRouterPolicyTests`, `--sanitize=address --sanitize=undefined`, `SonicRouterBench` | commit de CAM-003, misma rama | ídem, Apple M5 | 136 comprobaciones en cada modo; de 1,05× a 44× más rápido |
 | Copia bit a bit y formato (CAM-001 T1/T2) | `Scripts/test.sh`, `swift build -Xswiftc -warnings-as-errors` | rama `feature/cam-001-reemision-transparente` | ídem | 111 comprobaciones, todas pasan; compilación estricta OK |
 | Compila para Intel | `swift build -c release --triple x86_64-apple-macosx15.0 --product SonicRouter` | ídem | ídem | OK; binario no ejecutado |

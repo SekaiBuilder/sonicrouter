@@ -85,7 +85,8 @@ CAM-003 en `feature/cam-001-reemision-transparente`.
 | A04 | `nm -u` del objeto del núcleo en release (arm64 y x86_64) | Externos: `new`/`delete` (con `nothrow`), `exp10`, `sincos`, `bzero`, `memcpy`, `vDSP_maxmgv`, `vDSP_vsmul`. Ninguno de Swift |
 | Memoria y comportamiento indefinido | `swift run --sanitize=address --sanitize=undefined SonicRouterPolicyTests` | 136 pasan; ningún informe de ASan ni UBSan |
 | Compilación estricta | `swift build -Xswiftc -warnings-as-errors` | OK |
-| Intel | `swift build -c release --triple x86_64-apple-macosx15.0 --product SonicRouter` | Compila; no ejecutado |
+| Intel | `swift build -c release --triple x86_64-apple-macosx15.0 --product SonicRouterPolicyTests` y `arch -x86_64` sobre el binario (Rosetta 2) | 136, todas pasan, incluida la igualdad bit a bit (CAM-003-R04). Intel nativo no probado |
+| Paquete universal | `Scripts/build-app.sh` (tras el arreglo de abajo) | `x86_64 arm64`, firma ad hoc válida, `sr_renderer_ioproc` en las dos; app **no abierta** |
 | App arm64 | `SONICROUTER_UNIVERSAL=0 Scripts/build-app.sh` | Construida, firma ad hoc válida, contiene `sr_renderer_ioproc`; **no abierta** |
 
 A05, nanosegundos por bloque de 256 tramas (5,33 ms de audio a 48 kHz);
@@ -113,16 +114,16 @@ Observaciones:
   lenguajes; la equivalencia se ha comprobado en ese modo, no contra `pow`.
 - El ecualizador apenas mejora: ya era código de punteros sin Swift dentro.
 
-No ejecutado: la app en marcha, cualquier audio real, el binario Intel, el
-paquete universal (el script falla con `lipo` también antes de este cambio:
-ver «Fuera de alcance»).
+No ejecutado: la app en marcha, cualquier audio real, un Mac Intel nativo.
 
-## Fuera de alcance, encontrado al verificar
+## Arreglo aparte, encontrado al verificar
 
 - `Scripts/build-app.sh` en modo universal: con el sistema de compilación de
   Xcode 27.2 / Swift 6.4.2, `--show-bin-path` devuelve la misma carpeta para
-  arm64 e Intel y `lipo` falla («same architectures (x86_64)»). Reproducido en
-  `2b8aa30`, antes de CAM-003.
+  arm64 e Intel y `lipo` fallaba («same architectures (x86_64)»). Reproducido
+  en `2b8aa30`, antes de CAM-003. Arreglado el 2026-11-18 a petición del
+  titular: cada binario se copia a `build/arch/<arquitectura>/` antes de
+  compilar el siguiente (vale también con el sistema de compilación antiguo).
 
 ## Riesgos
 

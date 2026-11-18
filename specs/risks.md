@@ -18,4 +18,4 @@ Fecha: 2026-11-15. Probabilidad e impacto: alta, media, baja.
 | RIE-12 | Trabajo sin guardar en `feature/native-multi-output` (5 archivos) | — | Alto | Guardarlo antes de cualquier cambio de código |
 | RIE-13 | Dos canales divergen | Baja | Medio | Un solo código; diferencias tras condición de compilación |
 | RIE-14 | Un error de memoria en el núcleo C++ (CAM-003) que Swift no atraparía | Baja | Alto | Interfaz C pequeña, sin punteros guardados, ASan + UBSan en las pruebas, oráculo Swift bit a bit |
-| RIE-15 | El paquete universal no se construye (`lipo` falla en `Scripts/build-app.sh`, ya antes de CAM-003) | Alta | Medio | Arreglar el script; mientras, `SONICROUTER_UNIVERSAL=0` |
+| RIE-15 | ~~El paquete universal no se construye~~ (`lipo` fallaba en `Scripts/build-app.sh`). Cerrado el 2026-11-18: el script copia cada arquitectura aparte | — | — | Comprobado con `lipo -info` |
