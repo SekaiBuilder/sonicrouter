@@ -7,7 +7,8 @@ import Foundation
 /// Built off the realtime thread and read-only afterwards.
 public final class OutputChannelMap: @unchecked Sendable {
     public let deviceCount: Int
-    private let sources: [Int]
+    /// Tapped channel per output channel (-1 silent), in aggregate order.
+    public let sources: [Int]
 
     /// `deviceChannelCounts` lists each output device's channels in
     /// aggregate order. Every device gets L/R on its first two channels.

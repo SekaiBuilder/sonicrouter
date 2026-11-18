@@ -15,7 +15,7 @@ verificación**.
 | Sonido transparente ([CAM-001](../specs/changes/CAM-001-reemision-transparente.md)) | Aprobado; T1 y T2 hechos en `feature/cam-001-reemision-transparente` |
 | Prueba de sandbox ([CAM-002](../specs/changes/CAM-002-prueba-app-sandbox.md)) | Preparada, sin ejecutar |
 | Mediciones de referencia | Plan escrito ([performance.md](../specs/performance.md)) |
-| Evaluación de lenguajes | Preliminar: todo sigue en Swift ([languages.md](../specs/decisions/languages.md)) |
+| Evaluación de lenguajes | Núcleo de tiempo real en C++ ([CAM-003](../specs/changes/CAM-003-nucleo-tiempo-real-cpp.md), DEC-007); el resto en Swift ([languages.md](../specs/decisions/languages.md)) |
 | Proyecto Xcode, firma, ficha | Sin empezar; borradores en `Config/` y [`docs/store/`](store/metadata.md) |
 
 ## Matriz de compatibilidad con App Sandbox

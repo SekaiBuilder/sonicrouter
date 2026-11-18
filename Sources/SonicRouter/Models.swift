@@ -17,9 +17,8 @@ typealias AudioProfileMerge = SonicRouterCore.AudioProfileMerge
 typealias MultiOutputPlan = SonicRouterCore.MultiOutputPlan
 typealias MultiOutputMember = SonicRouterCore.MultiOutputMember
 typealias OutputChannelMap = SonicRouterCore.OutputChannelMap
-typealias GainBox = SonicRouterCore.GainBox
 typealias RealtimeGainLimiter = SonicRouterCore.RealtimeGainLimiter
-typealias StereoRender = SonicRouterCore.StereoRender
+typealias RealtimeRenderer = SonicRouterCore.RealtimeRenderer
 typealias RenderFormatCheck = SonicRouterCore.RenderFormatCheck
 
 /// UserDefaults keys shared by Settings and the app delegate.

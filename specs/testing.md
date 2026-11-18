@@ -4,7 +4,9 @@
 
 | Qué | Cómo | Cubre |
 |---|---|---|
-| `SonicRouterPolicyTests` (ejecutable, 111 comprobaciones desde el 2026-11-18) | `Scripts/test.sh` | Solo `SonicRouterCore`: política de control, ecualizador (respuesta en frecuencia y procesado), formato y fusión de perfiles, plan multi-salida, mapa de canales, copia en tiempo real bit a bit y comprobación de formato (CAM-001 A01, A02, A06) |
+| `SonicRouterPolicyTests` (ejecutable, 136 comprobaciones desde el 2026-11-18) | `Scripts/test.sh` | `SonicRouterCore` y el núcleo C++ `SonicRouterDSP`: política de control, ecualizador (respuesta en frecuencia y procesado), formato y fusión de perfiles, plan multi-salida, mapa de canales, copia bit a bit, comprobación de formato (CAM-001 A01, A02, A06) y equivalencia bit a bit con la versión Swift anterior (CAM-003, oráculo en `SwiftReference.swift`) |
+| `SonicRouterBench` | `swift run -c release SonicRouterBench` | Coste por bloque del render con búferes sintéticos (CAM-003-A05) |
+| Sanitizers | `swift run --sanitize=address --sanitize=undefined SonicRouterPolicyTests` | ASan y UBSan sobre las pruebas |
 | Compilación estricta | `swift build -Xswiftc -warnings-as-errors` | Ejecutada el 2026-11-18 en la rama de CAM-001: OK |
 
 Sin cobertura: motor de audio, clientes Core Audio, stores, interfaz, atajos,
@@ -18,6 +20,7 @@ Evidencia del 2026-11-15, árbol de `e67f575` más cambios sin guardar, Xcode
 | `swift build` | OK |
 | `Scripts/test.sh` | 85 comprobaciones, todas pasan |
 | `Scripts/test.sh` (2026-11-18, rama `feature/cam-001-reemision-transparente`) | 111 comprobaciones, todas pasan |
+| `Scripts/test.sh`, release y ASan + UBSan (2026-11-18, CAM-003) | 136 comprobaciones, todas pasan |
 | `swift build -c release --triple x86_64-apple-macosx15.0 --product SonicRouter` (en carpeta temporal) | Compila. El binario Intel no se ha ejecutado |
 
 ## Estrategia objetivo
@@ -33,7 +36,7 @@ Evidencia del 2026-11-15, árbol de `e67f575` más cambios sin guardar, Xcode
 | Perfiles | Archivo malformado, versión futura, 1.001 entradas, valores fuera de rango | Ya cubierto en parte |
 | Seguridad | Ningún import de red ni escritura de audio (SEG-01-R05) | Ninguno |
 | Trazabilidad | Todo ID de requisito citado en una prueba o marcado «manual» | `sdd-deriva.py --estricto` |
-| Sanitizers | Thread Sanitizer y Address Sanitizer sobre las pruebas | Ninguno |
+| Sanitizers | Thread Sanitizer sobre las pruebas (ASan y UBSan ya se ejecutan, CAM-003) | Ninguno |
 
 ### Con Mac real (no automatizables en CI)
 

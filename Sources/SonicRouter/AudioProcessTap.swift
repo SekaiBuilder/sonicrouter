@@ -1,4 +1,3 @@
-import Accelerate
 import AudioToolbox
 import CoreAudio
 import Foundation
@@ -599,14 +598,18 @@ final class MuteEngine {
 final class AppVolumeTap {
     let pid: pid_t
     let processObjectIDs: [AudioObjectID]
-    let gainBox: GainBox
-    let equalizerParameters: EqualizerParameters
     private(set) var outputUID: String
     let outputDeviceID: AudioObjectID
 
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private var ioProcID: AudioDeviceIOProcID?
+    /// C++ render state (`SonicRouterDSP`) that the C IOProc reads. Released
+    /// only after the IOProc has been stopped and destroyed.
+    private var renderer: RealtimeRenderer?
+    private var storedGain: Float
+    private var storedMakeup: Float
+    private var storedEqualizer: AudioEqualizerSettings
 
     init(
         pid: pid_t,
@@ -619,8 +622,9 @@ final class AppVolumeTap {
     ) {
         self.pid = pid
         self.processObjectIDs = processObjectIDs
-        self.gainBox = GainBox(max(0, min(1, gain)), makeup: max(0.5, min(8, makeup)))
-        self.equalizerParameters = EqualizerParameters(equalizer)
+        self.storedGain = max(0, min(1, gain))
+        self.storedMakeup = max(0.5, min(8, makeup))
+        self.storedEqualizer = equalizer
         self.outputUID = outputUID
         self.outputDeviceID = outputDeviceID
     }
@@ -628,19 +632,28 @@ final class AppVolumeTap {
     deinit { invalidate() }
 
     var gain: Float {
-        get { gainBox.gain }
-        set { gainBox.gain = max(0, min(1, newValue)) }
+        get { storedGain }
+        set {
+            storedGain = max(0, min(1, newValue))
+            renderer?.setGain(storedGain)
+        }
     }
 
     var makeup: Float {
-        get { gainBox.makeup }
-        set { gainBox.makeup = max(0.5, min(8, newValue)) }
+        get { storedMakeup }
+        set {
+            storedMakeup = max(0.5, min(8, newValue))
+            renderer?.setMakeup(storedMakeup)
+        }
     }
 
     /// Live-adjustable: the render thread glides to the new gains.
     var equalizer: AudioEqualizerSettings {
-        get { equalizerParameters.settings }
-        set { equalizerParameters.settings = newValue }
+        get { storedEqualizer }
+        set {
+            storedEqualizer = newValue
+            renderer?.setEqualizer(newValue)
+        }
     }
 
     func activate() throws {
@@ -680,7 +693,7 @@ final class AppVolumeTap {
         // 256 frames (~5 ms) cut the measured tap → speaker delay from ~66 ms
         // to ~50 ms; 128 gained only a few ms more at a higher CPU cost.
         TapAggregate.setBufferFrameSize(256, on: aggregateID)
-        // StereoRender copies raw Float32: refuse to start on anything else
+        // The renderer copies raw Float32: refuse to start on anything else
         // rather than play it as noise. Destroying the tap gives the app its
         // native path back. A format that cannot be read is logged and allowed,
         // as before this check existed.
@@ -698,22 +711,22 @@ final class AppVolumeTap {
             ?? TapAggregate.nominalSampleRate(outputDeviceID)
             ?? 48_000
 
-        let box = gainBox
-        let limiter = RealtimeGainLimiter(initialGain: box.gain * box.makeup)
-        let equalizer = RealtimeEqualizer(parameters: equalizerParameters, sampleRate: sampleRate)
-        let ioBlock: AudioDeviceIOBlock = { _, inputData, _, outputData, _ in
-            StereoRender.copy(
-                input: inputData,
-                output: outputData,
-                requestedGain: box.gain * box.makeup,
-                limiter: limiter,
-                equalizer: equalizer,
-                channelMap: channelMap
-            )
+        // The IOProc is a C function over C++ state: the render thread never
+        // enters the Swift runtime (CAM-003).
+        guard let renderer = RealtimeRenderer(
+            sampleRate: sampleRate,
+            gain: storedGain,
+            makeup: storedMakeup,
+            equalizer: storedEqualizer,
+            channelMap: channelMap
+        ) else {
+            invalidate()
+            throw TapError.coreAudio(.prepareVolume, kAudioHardwareUnspecifiedError)
         }
+        self.renderer = renderer
 
         var newProcID: AudioDeviceIOProcID?
-        let procStatus = AudioDeviceCreateIOProcIDWithBlock(&newProcID, aggregateID, nil, ioBlock)
+        let procStatus = AudioDeviceCreateIOProcID(aggregateID, RealtimeRenderer.ioProc, renderer.clientData, &newProcID)
         guard procStatus == noErr, let newProcID else {
             invalidate()
             throw TapError.coreAudio(.prepareVolume, procStatus)
@@ -780,5 +793,7 @@ final class AppVolumeTap {
             AudioHardwareDestroyProcessTap(tapID)
             tapID = kAudioObjectUnknown
         }
+        // Only now, with the IOProc gone, may the C++ state it reads be freed.
+        renderer = nil
     }
 }

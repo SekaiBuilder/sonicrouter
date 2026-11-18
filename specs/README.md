@@ -44,6 +44,7 @@ dependencia nuevos, retirar o degradar una función, publicar.
 | [decisions/README.md](decisions/README.md) | Decisiones registradas y abiertas | Primera versión |
 | [decisions/languages.md](decisions/languages.md) | Evaluación Swift / Rust / C++ | Preliminar, sin mediciones |
 | [changes/CAM-001-reemision-transparente.md](changes/CAM-001-reemision-transparente.md) | Sonido sin alteración en la re-emisión | Aprobado; T1 y T2 hechos en su rama |
+| [changes/CAM-003-nucleo-tiempo-real-cpp.md](changes/CAM-003-nucleo-tiempo-real-cpp.md) | Núcleo de tiempo real en C++ | Hecho; sin probar con audio real |
 | [changes/CAM-002-prueba-app-sandbox.md](changes/CAM-002-prueba-app-sandbox.md) | Prueba mínima con App Sandbox | Preparada, sin ejecutar |
 | [../docs/APP_STORE_MIGRATION.md](../docs/APP_STORE_MIGRATION.md) | Seguimiento de la migración a la tienda | En curso |
 | [../docs/store/metadata.md](../docs/store/metadata.md) | Ficha, notas de revisión, política de privacidad | Borrador |
@@ -60,11 +61,13 @@ Pendientes de escribir: specs de dispositivos (`CoreAudioClient.swift`,
 | `Sources/SonicRouterCore/Equalizer.swift` (procesado en tiempo real, líneas 250–476) | A fondo |
 | `Sources/SonicRouterCore/OutputChannelMap.swift`, `MultiOutputPlan.swift` | A fondo |
 | `Sources/SonicRouterCore/RealtimeRender.swift` (nuevo, CAM-001) | A fondo |
+| `Sources/SonicRouterDSP/` (nuevo, CAM-003, C++) | A fondo |
+| `Tests/SonicRouterPolicyTests/SwiftReference.swift`, `Tests/SonicRouterBench/` (nuevos, CAM-003) | A fondo |
 | `Sources/SonicRouter/LaunchAtLogin.swift`, `SonicRouterApp.swift` | A fondo |
 | `Sources/SonicRouter/ApplicationAudioStore.swift` | A fondo |
 | `Sources/SonicRouterCore/AudioControlPolicy.swift`, `ProfileArchive.swift` | A fondo |
 | `Sources/SonicRouter/GlobalHotKeys.swift` | A fondo |
-| `Sources/SonicRouterCore/Equalizer.swift` (diseño de filtros, líneas 1–249) | No leído |
+| `Sources/SonicRouterCore/Equalizer.swift` | A fondo (2026-11-18, al pasarlo a C++) |
 | `Tests/SonicRouterPolicyTests/main.swift` | Por estructura; a fondo solo las pruebas de mapa de canales y de CAM-001 |
 | `Package.swift`, `Scripts/build-app.sh`, `Scripts/test.sh`, README, SECURITY, CONTRIBUTING, roadmap | A fondo |
 | Resto de `Sources/` y `Tests/` | No leído o solo por nombres |
@@ -83,6 +86,7 @@ de `SECURITY.md` (ya existían).
 | Compila | `swift build` | `e67f575` + cambios sin guardar | Xcode 27.2, Swift 6.4.2, macOS 27.2, arm64 | OK |
 | Pruebas de lógica pura | `Scripts/test.sh` | ídem | ídem | 85 comprobaciones, todas pasan |
 
+| Núcleo C++ igual bit a bit a Swift, ASan + UBSan, rendimiento (CAM-003) | `Scripts/test.sh`, `swift run -c release SonicRouterPolicyTests`, `--sanitize=address --sanitize=undefined`, `SonicRouterBench` | commit de CAM-003, misma rama | ídem, Apple M5 | 136 comprobaciones en cada modo; de 1,05× a 44× más rápido |
 | Copia bit a bit y formato (CAM-001 T1/T2) | `Scripts/test.sh`, `swift build -Xswiftc -warnings-as-errors` | rama `feature/cam-001-reemision-transparente` | ídem | 111 comprobaciones, todas pasan; compilación estricta OK |
 | Compila para Intel | `swift build -c release --triple x86_64-apple-macosx15.0 --product SonicRouter` | ídem | ídem | OK; binario no ejecutado |
 

@@ -1,4 +1,5 @@
 import Foundation
+import SonicRouterDSP
 
 public struct AudioRouteProfile: Identifiable, Codable, Hashable, Sendable {
     public var id: UUID
@@ -81,13 +82,9 @@ public enum AudioGainPolicy {
     /// user's slider and must map 1:1 to the output. The cap also never goes
     /// below unity — a source that is already hot plays at its native level
     /// instead of being ducked quieter than the original path.
+    /// Implemented in C++ (`sr_headroom_limited_gain`), shared with the render thread.
     public static func headroomLimitedGain(requestedGain: Float, inputPeak: Float) -> Float {
-        let requested = max(0, requestedGain)
-        guard requested.isFinite else { return 0 }
-        guard requested > 1 else { return requested }
-        let peak = max(0, inputPeak)
-        guard peak.isFinite, peak > 0 else { return requested }
-        return min(requested, max(1, 1 / peak))
+        sr_headroom_limited_gain(requestedGain, inputPeak)
     }
 }
 

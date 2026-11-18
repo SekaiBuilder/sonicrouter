@@ -11,9 +11,11 @@ Fecha: 2026-11-15. Probabilidad e impacto: alta, media, baja.
 | RIE-05 | Regresiones al tocar el motor sin pruebas | Alta | Alto | Mover la copia de audio al núcleo y cubrirla antes de cambiarla |
 | RIE-06 | El usuario pierde ajustes al pasar a la versión con sandbox | Alta | Medio | Migración de preferencias en el primer arranque |
 | RIE-07 | La app se cae con controles activos y deja audio silenciado | Baja | Alto | El sistema destruye los taps al morir el proceso `[POR ACLARAR: comprobar con kill -9]`; limpieza al arrancar |
-| RIE-08 | Reservas ocultas en el callback provocan cortes bajo carga | Media | Medio | Medir (AUD-01-B02); pasar solo punteros al callback |
+| RIE-08 | Reservas ocultas en el callback provocan cortes bajo carga | Baja (desde CAM-003) | Medio | IOProc en C sin Swift (CAM-003); falta medir en Mac real (AUD-01-B02) |
 | RIE-09 | Cambiar la frecuencia del hardware o la salida del sistema molesta al usuario o a la revisión | Media | Medio | CAM-001 lo elimina en el caso común; documentar el resto |
 | RIE-10 | Mantener Intel sin un Mac Intel donde probar | Alta | Bajo | Decidir DEC-102 |
 | RIE-11 | Las specs se quedan atrás del código | Media | Medio | Spec en el mismo commit; `sdd-deriva.py --estricto` en CI |
 | RIE-12 | Trabajo sin guardar en `feature/native-multi-output` (5 archivos) | — | Alto | Guardarlo antes de cualquier cambio de código |
 | RIE-13 | Dos canales divergen | Baja | Medio | Un solo código; diferencias tras condición de compilación |
+| RIE-14 | Un error de memoria en el núcleo C++ (CAM-003) que Swift no atraparía | Baja | Alto | Interfaz C pequeña, sin punteros guardados, ASan + UBSan en las pruebas, oráculo Swift bit a bit |
+| RIE-15 | El paquete universal no se construye (`lipo` falla en `Scripts/build-app.sh`, ya antes de CAM-003) | Alta | Medio | Arreglar el script; mientras, `SONICROUTER_UNIVERSAL=0` |

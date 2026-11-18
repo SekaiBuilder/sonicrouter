@@ -50,6 +50,10 @@ lo que sale sea **la misma señal multiplicada por la ganancia**, y nada más.
    (`GainBox`, `RealtimeGainLimiter`, `StereoRender`, `RenderFormatCheck`),
    movidos sin cambiar el código salvo `public`.
 
+   Nota (2026-11-18): CAM-003 sustituyó después `StereoRender` y `GainBox` por
+   el renderizador C++ `RealtimeRenderer`; A01 y A02 se ejecutan ahora contra el
+   C++ y siguen pasando.
+
    Decisión de T2 (2026-11-18): un formato que no se puede leer **no** bloquea
    el motor; se arranca como antes y queda en el log. Bloquear ahí podría
    apagar un motor que hoy funciona por un fallo de lectura que no se ha

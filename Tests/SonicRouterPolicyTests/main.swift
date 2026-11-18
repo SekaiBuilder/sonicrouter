@@ -534,15 +534,14 @@ private func render(
     gain: Float,
     channelMap: OutputChannelMap = OutputChannelMap(deviceChannelCounts: [2])
 ) {
-    let equalizer = RealtimeEqualizer(parameters: EqualizerParameters(.flat), sampleRate: 48_000)
-    StereoRender.copy(
-        input: UnsafePointer(input.list.unsafePointer),
-        output: output.list.unsafeMutablePointer,
-        requestedGain: gain,
-        limiter: RealtimeGainLimiter(initialGain: gain),
-        equalizer: equalizer,
+    let renderer = RealtimeRenderer(
+        sampleRate: 48_000,
+        gain: gain,
+        makeup: 1,
+        equalizer: .flat,
         channelMap: channelMap
-    )
+    )!
+    renderer.render(input: UnsafePointer(input.list.unsafePointer), output: output.list.unsafeMutablePointer)
 }
 
 private func bits(_ values: [Float]) -> [UInt32] { values.map(\.bitPattern) }
@@ -678,6 +677,116 @@ private func runRenderFormatCheckTests(_ tests: inout TestState) {
     )
 }
 
+// MARK: - CAM-003: C++ core equals the previous Swift path bit for bit
+
+private func runCppEquivalenceTests(_ tests: inout TestState) {
+    // Filter design and pre-gain: same coefficients, bit for bit.
+    var designMismatches = 0
+    var preampMismatches = 0
+    for rate in [8_000.0, 16_000, 44_100, 48_000, 96_000, 192_000] {
+        for gain in stride(from: -12.0, through: 12.0, by: 0.75) {
+            let pairs: [(BiquadCoefficients, RefBiquad)] = [
+                (EqualizerBand.bass.coefficients(gainDB: gain, sampleRate: rate), RefDesign.lowShelf(frequency: 100, gainDB: gain, sampleRate: rate)),
+                (EqualizerBand.mid.coefficients(gainDB: gain, sampleRate: rate), RefDesign.peaking(frequency: 1_000, gainDB: gain, q: 0.8, sampleRate: rate)),
+                (EqualizerBand.treble.coefficients(gainDB: gain, sampleRate: rate), RefDesign.highShelf(frequency: 8_000, gainDB: gain, sampleRate: rate)),
+            ]
+            for (cpp, ref) in pairs {
+                let same = [cpp.b0, cpp.b1, cpp.b2, cpp.a1, cpp.a2].map(\.bitPattern) == [ref.b0, ref.b1, ref.b2, ref.a1, ref.a2].map(\.bitPattern)
+                if !same { designMismatches += 1 }
+            }
+            let cppPre = EqualizerHeadroom.preampGain(pairs[0].0, pairs[1].0, pairs[2].0, sampleRate: rate)
+            let refPre = RefHeadroom.preampGain(pairs[0].1, pairs[1].1, pairs[2].1, sampleRate: rate)
+            if cppPre.bitPattern != refPre.bitPattern { preampMismatches += 1 }
+        }
+    }
+    tests.expect(designMismatches == 0, "CAM-003-A02: C++ filter design must equal Swift bit for bit (\(designMismatches) differ)")
+    tests.expect(preampMismatches == 0, "CAM-003-A02: C++ pre-gain must equal Swift bit for bit (\(preampMismatches) differ)")
+
+    for peak: Float in [0.2, 0.9, 1.7] {
+        for requested: Float in [0, 0.5, 1, 1.3, 2.5, 8] {
+            let ref = RefGainPolicy.headroomLimitedGain(requestedGain: requested, inputPeak: peak)
+            let cpp = AudioGainPolicy.headroomLimitedGain(requestedGain: requested, inputPeak: peak)
+            tests.expect(ref.bitPattern == cpp.bitPattern, "CAM-003-A02: headroom gain must match for \(requested) at peak \(peak)")
+        }
+    }
+
+    // Full render path over many cycles, with live gain and EQ changes that
+    // exercise glides, bypass, drain and the makeup limiter.
+    struct Scenario {
+        let name: String
+        let inputLayout: [Int]
+        let outputLayout: [Int]
+        let devices: [Int]
+        let rate: Double
+        let scale: Float
+    }
+    let scenarios = [
+        Scenario(name: "interleaved stereo", inputLayout: [2], outputLayout: [2], devices: [2], rate: 48_000, scale: 0.8),
+        Scenario(name: "planar stereo", inputLayout: [1, 1], outputLayout: [1, 1], devices: [2], rate: 44_100, scale: 0.8),
+        Scenario(name: "two outputs", inputLayout: [2], outputLayout: [2, 2], devices: [2, 2], rate: 48_000, scale: 0.8),
+        Scenario(name: "stereo + 6ch outputs", inputLayout: [2], outputLayout: [2, 6], devices: [2, 6], rate: 96_000, scale: 0.8),
+        Scenario(name: "hot input over 0 dBFS", inputLayout: [2], outputLayout: [2], devices: [2], rate: 48_000, scale: 1.6),
+    ]
+    let schedule: [(cycle: Int, gain: Float, makeup: Float, eq: AudioEqualizerSettings)] = [
+        (0, 1, 1, .flat),
+        (40, 0.5, 1, AudioEqualizerSettings(bass: 6, mid: -3, treble: 3)),
+        (90, 0.731, 2.5, AudioEqualizerSettings(bass: 12, mid: 12, treble: 12)),
+        (150, 1, 1, AudioEqualizerSettings(bass: -9, mid: 4, treble: 0)),
+        (210, 0.25, 1, .flat),
+        (260, 1, 8, .flat),
+    ]
+    let frames = 256
+    let cycles = 320
+    for scenario in scenarios {
+        let channels = scenario.inputLayout.reduce(0, +)
+        let renderer = RealtimeRenderer(
+            sampleRate: scenario.rate, gain: 1, makeup: 1, equalizer: .flat,
+            channelMap: OutputChannelMap(deviceChannelCounts: scenario.devices)
+        )!
+        let refParameters = EqualizerParameters(.flat)
+        let refEqualizer = RefEqualizer(parameters: refParameters, sampleRate: scenario.rate)
+        let refLimiter = RefLimiter(initialGain: 1)
+        let refMap = OutputChannelMap(deviceChannelCounts: scenario.devices)
+        var gain: Float = 1
+        var makeup: Float = 1
+        var mismatches = 0
+        for cycle in 0..<cycles {
+            if let step = schedule.first(where: { $0.cycle == cycle }) {
+                gain = step.gain
+                makeup = step.makeup
+                renderer.setGain(gain)
+                renderer.setMakeup(makeup)
+                renderer.setEqualizer(step.eq)
+                refParameters.settings = step.eq
+            }
+            let signal = renderTestSamples(count: channels * frames, seed: UInt32(cycle + 11)).map { $0 * scenario.scale }
+            var perBuffer: [[Float]] = []
+            var offset = 0
+            for bufferChannels in scenario.inputLayout {
+                let count = bufferChannels * frames
+                perBuffer.append(Array(signal[offset..<offset + count]))
+                offset += count
+            }
+            let input = TestBufferList(layout: scenario.inputLayout, frames: frames, samples: perBuffer)
+            let cppOut = TestBufferList(layout: scenario.outputLayout, frames: frames)
+            let refOut = TestBufferList(layout: scenario.outputLayout, frames: frames)
+            renderer.render(input: UnsafePointer(input.list.unsafePointer), output: cppOut.list.unsafeMutablePointer)
+            RefRender.copy(
+                input: UnsafePointer(input.list.unsafePointer),
+                output: refOut.list.unsafeMutablePointer,
+                requestedGain: gain * makeup,
+                limiter: refLimiter,
+                equalizer: refEqualizer,
+                channelMap: refMap
+            )
+            for buffer in 0..<scenario.outputLayout.count where bits(cppOut.samples(buffer)) != bits(refOut.samples(buffer)) {
+                mismatches += 1
+            }
+        }
+        tests.expect(mismatches == 0, "CAM-003-A01: C++ render must equal the Swift path bit for bit (\(scenario.name): \(mismatches) buffers differ)")
+    }
+}
+
 private var tests = TestState()
 runPolicyTests(&tests)
 runEqualizerSettingsTests(&tests)
@@ -688,6 +797,7 @@ runMultiOutputPlanTests(&tests)
 runOutputChannelMapTests(&tests)
 runRealtimeRenderTests(&tests)
 runRenderFormatCheckTests(&tests)
+runCppEquivalenceTests(&tests)
 
 if tests.failures.isEmpty {
     print("SonicRouter policy tests passed: \(tests.checks) checks")

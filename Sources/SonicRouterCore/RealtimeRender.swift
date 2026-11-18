@@ -1,40 +1,63 @@
-import Accelerate
 import CoreAudio
 import Foundation
-import Synchronization
+import SonicRouterDSP
 
-// MARK: - Gain box
+// MARK: - Realtime renderer
 
-/// Holds realtime parameters as atomic Float bit patterns. The UI can update
-/// them without racing the Core Audio callback and the callback never takes a
-/// lock or allocates memory.
-public final class GainBox: Sendable {
-    private let gainBits: Atomic<UInt32>
-    private let makeupBits: Atomic<UInt32>
+/// One volume engine's render state, implemented in C++ (`SonicRouterDSP`):
+/// the IOProc is the C function `ioProc` with this object's `clientData`, so
+/// the Core Audio render thread never enters the Swift runtime. It copies the
+/// tapped audio scaled by gain × makeup, limits makeup boosts above unity,
+/// spreads channels with an `OutputChannelMap` and runs the equalizer.
+///
+/// Owned by Swift: keep it alive until the IOProc has been stopped and
+/// destroyed. Setters are lock-free and safe from any thread.
+public final class RealtimeRenderer: @unchecked Sendable {
+    private let handle: OpaquePointer
 
-    public var gain: Float {
-        get { Float(bitPattern: gainBits.load(ordering: .relaxed)) }
-        set { gainBits.store(newValue.bitPattern, ordering: .relaxed) }
+    /// The C IOProc to register with `AudioDeviceCreateIOProcID`.
+    public static let ioProc: AudioDeviceIOProc = { device, now, input, inputTime, output, outputTime, client in
+        sr_renderer_ioproc(device, now, input, inputTime, output, outputTime, client)
     }
 
-    /// Makeup gain that lifts the re-emitted signal back up to the app's original
-    /// loudness (the capture→re-emit path comes out quieter). Live-adjustable.
-    public var makeup: Float {
-        get { Float(bitPattern: makeupBits.load(ordering: .relaxed)) }
-        set { makeupBits.store(newValue.bitPattern, ordering: .relaxed) }
+    public init?(
+        sampleRate: Double,
+        gain: Float,
+        makeup: Float,
+        equalizer: AudioEqualizerSettings,
+        channelMap: OutputChannelMap
+    ) {
+        let sources = channelMap.sources.map(Int32.init)
+        guard let handle = sources.withUnsafeBufferPointer({ buffer in
+            sr_renderer_create(
+                sampleRate, gain, makeup,
+                equalizer.bass, equalizer.mid, equalizer.treble,
+                buffer.baseAddress, Int32(buffer.count), Int32(channelMap.deviceCount)
+            )
+        }) else { return nil }
+        self.handle = handle
     }
 
-    public init(_ gain: Float, makeup: Float = 1) {
-        gainBits = Atomic(gain.bitPattern)
-        makeupBits = Atomic(makeup.bitPattern)
+    deinit { sr_renderer_destroy(handle) }
+
+    /// Pass as the IOProc client data. Valid while this object lives.
+    public var clientData: UnsafeMutableRawPointer { UnsafeMutableRawPointer(handle) }
+
+    public func setGain(_ gain: Float) { sr_renderer_set_gain(handle, gain) }
+    public func setMakeup(_ makeup: Float) { sr_renderer_set_makeup(handle, makeup) }
+    public func setEqualizer(_ settings: AudioEqualizerSettings) {
+        sr_renderer_set_equalizer(handle, settings.bass, settings.mid, settings.treble)
+    }
+
+    /// Renders one block, exactly as the IOProc does. For tests and benchmarks.
+    public func render(input: UnsafePointer<AudioBufferList>, output: UnsafeMutablePointer<AudioBufferList>) {
+        sr_renderer_render(handle, input, output)
     }
 }
 
-/// Mutable only from one Core Audio render thread. Only engages for makeup
-/// boosts above unity: gain reduction there is immediate and recovery is
-/// smoothed so speech peaks do not turn into clipping or pumping. At or below
-/// unity the slider value passes through exactly — the volume control must be
-/// a transparent 1:1 attenuation, never an AGC.
+/// The makeup limiter on its own (the renderer embeds one). Only engages for
+/// boosts above unity: reduction is immediate and recovery smoothed. At or
+/// below unity the requested gain passes through exactly.
 public final class RealtimeGainLimiter: @unchecked Sendable {
     private var appliedGain: Float
 
@@ -43,187 +66,7 @@ public final class RealtimeGainLimiter: @unchecked Sendable {
     }
 
     public func gain(requestedGain: Float, inputPeak: Float) -> Float {
-        let requested = max(0, requestedGain)
-        guard requested > 1 else {
-            appliedGain = requested
-            return requested
-        }
-
-        let target = AudioGainPolicy.headroomLimitedGain(
-            requestedGain: requested,
-            inputPeak: inputPeak
-        )
-        if target < appliedGain {
-            appliedGain = target
-        } else {
-            appliedGain += (target - appliedGain) * 0.08
-        }
-        appliedGain = min(appliedGain, requested)
-        return appliedGain
-    }
-}
-
-// MARK: - Realtime stereo copy
-
-/// Copies an app's tapped audio into the output device buffers, scaled by gain,
-/// then runs the app's equalizer over them in place. Handles interleaved and
-/// planar Float32 layouts so it works across output devices. The fast path
-/// (one device, matching layouts) does a straight vDSP scale with no
-/// allocation; otherwise `channelMap` sends L/R to the first two channels of
-/// every output device in the aggregate.
-public enum StereoRender {
-    public static func copy(
-        input: UnsafePointer<AudioBufferList>,
-        output: UnsafeMutablePointer<AudioBufferList>,
-        requestedGain: Float,
-        limiter: RealtimeGainLimiter,
-        equalizer: RealtimeEqualizer,
-        channelMap: OutputChannelMap
-    ) {
-        let inList = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
-        let outList = UnsafeMutableAudioBufferListPointer(output)
-
-        for buffer in outList {
-            if let data = buffer.mData { memset(data, 0, Int(buffer.mDataByteSize)) }
-        }
-        guard requestedGain > 0, !inList.isEmpty else { return }
-        // The peak scan only matters for makeup boosts; at or below unity the
-        // limiter passes the requested gain through untouched.
-        let gain = limiter.gain(
-            requestedGain: requestedGain,
-            inputPeak: requestedGain > 1 ? peakMagnitude(inList) : 0
-        )
-        guard gain > 0 else { return }
-
-        if channelMap.deviceCount > 1 || !fastCopy(inList: inList, outList: outList, gain: gain) {
-            copyMapped(inList: inList, outList: outList, gain: gain, channelMap: channelMap)
-        }
-        applyEqualizer(equalizer, to: outList)
-    }
-
-    /// Filters the rendered output in place. A flat, settled equalizer returns
-    /// straight away, so the default path stays a bit-exact scaled copy.
-    private static func applyEqualizer(
-        _ equalizer: RealtimeEqualizer,
-        to outList: UnsafeMutableAudioBufferListPointer
-    ) {
-        guard equalizer.beginCycle() else { return }
-        var firstChannel = 0
-        for buffer in outList {
-            let channels = max(1, Int(buffer.mNumberChannels))
-            if let data = buffer.mData {
-                let frames = Int(buffer.mDataByteSize) / (MemoryLayout<Float>.stride * channels)
-                equalizer.process(
-                    data.assumingMemoryBound(to: Float.self),
-                    frameCount: frames,
-                    channelCount: channels,
-                    firstChannel: firstChannel
-                )
-            }
-            firstChannel += channels
-        }
-    }
-
-    private static func peakMagnitude(_ list: UnsafeMutableAudioBufferListPointer) -> Float {
-        var peak: Float = 0
-        for buffer in list {
-            guard let data = buffer.mData else { continue }
-            let count = Int(buffer.mDataByteSize) / MemoryLayout<Float>.stride
-            guard count > 0 else { continue }
-            var bufferPeak: Float = 0
-            vDSP_maxmgv(
-                data.assumingMemoryBound(to: Float.self),
-                1,
-                &bufferPeak,
-                vDSP_Length(count)
-            )
-            peak = max(peak, bufferPeak)
-        }
-        return peak
-    }
-
-    /// Straight scaled copy when input and output share the same buffer layout.
-    private static func fastCopy(
-        inList: UnsafeMutableAudioBufferListPointer,
-        outList: UnsafeMutableAudioBufferListPointer,
-        gain: Float
-    ) -> Bool {
-        guard inList.count == outList.count else { return false }
-        for index in 0..<outList.count where inList[index].mNumberChannels != outList[index].mNumberChannels {
-            return false
-        }
-
-        var scalar = gain
-        for index in 0..<outList.count {
-            guard let inData = inList[index].mData, let outData = outList[index].mData else { continue }
-            let count = min(Int(inList[index].mDataByteSize), Int(outList[index].mDataByteSize)) / MemoryLayout<Float>.stride
-            guard count > 0 else { continue }
-            vDSP_vsmul(
-                inData.assumingMemoryBound(to: Float.self), 1,
-                &scalar,
-                outData.assumingMemoryBound(to: Float.self), 1,
-                vDSP_Length(count)
-            )
-        }
-        return true
-    }
-
-    /// Allocation-free copy driven by `channelMap`: each output device gets
-    /// L/R on its first two channels; extra channels stay silent instead of
-    /// receiving duplicated left-channel audio.
-    private static func copyMapped(
-        inList: UnsafeMutableAudioBufferListPointer,
-        outList: UnsafeMutableAudioBufferListPointer,
-        gain: Float,
-        channelMap: OutputChannelMap
-    ) {
-        let inputChannels = inList.reduce(0) { $0 + max(1, Int($1.mNumberChannels)) }
-        guard inputChannels > 0 else { return }
-
-        var outputChannel = 0
-        for buffer in outList {
-            guard let data = buffer.mData else {
-                outputChannel += max(1, Int(buffer.mNumberChannels))
-                continue
-            }
-            let channels = max(1, Int(buffer.mNumberChannels))
-            let frames = Int(buffer.mDataByteSize) / (MemoryLayout<Float>.stride * channels)
-            let samples = data.assumingMemoryBound(to: Float.self)
-
-            for channel in 0..<channels {
-                let mapped = channelMap.source(forOutputChannel: outputChannel + channel)
-                guard mapped >= 0 else { continue }
-                let sourceChannel = mapped < inputChannels ? mapped : 0
-                for frame in 0..<frames {
-                    samples[frame * channels + channel] = sample(
-                        from: inList,
-                        channel: sourceChannel,
-                        frame: frame
-                    ) * gain
-                }
-            }
-            outputChannel += channels
-        }
-    }
-
-    private static func sample(
-        from list: UnsafeMutableAudioBufferListPointer,
-        channel requestedChannel: Int,
-        frame: Int
-    ) -> Float {
-        var remainingChannel = requestedChannel
-        for buffer in list {
-            guard let data = buffer.mData else { continue }
-            let channels = max(1, Int(buffer.mNumberChannels))
-            guard remainingChannel < channels else {
-                remainingChannel -= channels
-                continue
-            }
-            let frames = Int(buffer.mDataByteSize) / (MemoryLayout<Float>.stride * channels)
-            guard frame < frames else { return 0 }
-            return data.assumingMemoryBound(to: Float.self)[frame * channels + remainingChannel]
-        }
-        return 0
+        sr_limiter_step(&appliedGain, requestedGain, inputPeak)
     }
 }
 
