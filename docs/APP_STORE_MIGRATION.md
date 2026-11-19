@@ -108,7 +108,7 @@ Rosetta 2; la app Intel no se ha ejecutado. Mantenerlo es
 | B3 | Notarización del canal directo: `Scripts/release-direct.sh` (Developer ID, notarytool, stapler, zip y SHA-256) | Esqueleto 2026-11-19; falta el perfil de `notarytool` y B6 |
 | B4 | Flujo de publicación en CI | Secretos de firma; decidir si se firma en CI o en local |
 | B5 | Ficha en App Store Connect | Nombre disponible, URL de soporte y de privacidad, precio |
-| B6 | Añadir `Config/Signing.xcconfig` a `.gitignore` | Solo visto bueno |
+| B6 | Añadir `Config/Signing.xcconfig` a `.gitignore` | Hecho 2026-11-19 con visto bueno del titular |
 
 ### C. Bloqueadas hasta activar la cuenta
 

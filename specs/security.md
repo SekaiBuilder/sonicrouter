@@ -32,7 +32,7 @@ cambia con la tienda.
 | SEG-01-R01 | La versión de tienda corre con App Sandbox y solo los entitlements que use | Depende de CAM-002 |
 | SEG-01-R02 | `SECURITY.md` §5 se corrige con el resultado de CAM-002, sea cual sea | Pendiente |
 | SEG-01-R03 | Manifiesto de privacidad (`PrivacyInfo.xcprivacy`) declarando el uso de `UserDefaults` y ningún dato recogido | **Hecho 2026-11-18**: `Config/PrivacyInfo.xcprivacy` (sin rastreo, sin datos recogidos, `UserDefaults` con CA92.1; es la única API de razón obligatoria hallada en `Sources/`), copiado por `Scripts/build-app.sh` y comprobado por `Scripts/verify-app.sh`. Sin validar por App Store Connect |
-| SEG-01-R04 | Ningún secreto ni dato de cuenta en el repositorio; la firma se configura en un archivo ignorado por git | Pendiente |
+| SEG-01-R04 | Ningún secreto ni dato de cuenta en el repositorio; la firma se configura en un archivo ignorado por git | **Hecho 2026-11-19**: `Config/Signing.xcconfig` en `.gitignore`; los scripts de publicación se niegan a correr si deja de estarlo |
 | SEG-01-R05 | Una prueba automática falla si `Sources/` importa `Network` o usa `URLSession`, o si el módulo de audio escribe archivos | **Hecho 2026-11-18**: `Scripts/check-security.sh` (búsqueda estática de red en todo `Sources/` y de escritura de archivos o grabación en `SonicRouterDSP`, `SonicRouterCore`, `AudioProcessTap`, `CoreAudio*`, `AudioDevice*`). Su `--selftest` demuestra que detecta 6 tipos de infracción. Es textual: no ve código generado ni llamadas indirectas |
 
 ## Brechas

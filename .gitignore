@@ -10,3 +10,6 @@ build/
 
 # Icono personalizado de carpeta (macOS)
 Icon?
+
+# Datos de la cuenta de Apple Developer (plan B6, SEG-01-R04)
+Config/Signing.xcconfig
