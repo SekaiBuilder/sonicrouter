@@ -38,11 +38,17 @@ en lugar de insinuar garantías que no podemos cumplir.
 | **INV-3** | Todos los taps y dispositivos agregados creados por la app llevan el prefijo `local.sonicrouter.*` y se destruyen al iniciar, al cerrar y con «Restaurar todo». |
 | **INV-4** | «Restaurar todo» (y el cierre de la app) elimina todo tap/agregado propio y devuelve el audio del sistema a su estado nativo. |
 
+Excepción conocida a INV-3 e INV-4 (2026-11-19): el dispositivo multi-salida
+(`local.sonicrouter.multioutput`) es público a propósito y ni el cierre ni «Restaurar
+todo» lo quitan; se elimina desde la propia app. Está registrado como brecha DEV-01-B01
+en `specs/features/devices.md`.
+
 Estos puntos son auditables leyendo el código: las únicas operaciones sobre el audio
-están en `StereoRender` y los `IOBlock` de `MuteEngine` / `AppVolumeTap`
-(`Sources/SonicRouter/AudioProcessTap.swift`) y en `RealtimeEqualizer`
-(`Sources/SonicRouterCore/Equalizer.swift`), y la limpieza en
-`SonicRouterAudioCleanup`.
+están en el núcleo C++ (`Sources/SonicRouterDSP/SonicRouterDSP.cpp`: copia con
+ganancia, limitador y ecualizador, con su IOProc `sr_renderer_ioproc`) y en el
+`IOBlock` de `MuteEngine` (`Sources/SonicRouter/AudioProcessTap.swift`), y la
+limpieza en `SonicRouterAudioCleanup`. `Scripts/check-security.sh` (también en la
+CI) falla si el código usa la red o si el motor de audio escribe archivos.
 
 ## 4. Qué protege / respeta
 
@@ -56,9 +62,14 @@ están en `StereoRender` y los `IOBlock` de `MuteEngine` / `AppVolumeTap`
 
 ## 5. Qué NO hace — no-garantías honestas
 
-- **No es un sandbox.** SonicRouter se ejecuta sin App Sandbox porque los Process Taps
-  necesitan acceso al audio del sistema. Concédele el permiso solo si confías en el
+- **No es un sandbox (todavía).** La versión actual se ejecuta sin App Sandbox. Está
+  pendiente comprobar si funciona con él (otros mezcladores públicos usan taps con
+  sandbox); el resultado se escribirá aquí. Concédele el permiso solo si confías en el
   binario que estás ejecutando (compílalo tú mismo desde la fuente si quieres certeza).
+- **Cambia ajustes del sistema cuando se lo pides.** Al elegir una salida cambia la
+  salida predeterminada (y la de alertas); el montaje de compatibilidad (mezcla estéreo)
+  puede cambiar la frecuencia de muestreo del dispositivo y no la devuelve; el
+  dispositivo multi-salida es público y sigue existiendo al cerrar la app.
 - **No cifra ni protege tu audio frente a otras apps.** Cualquier otra app con el mismo
   permiso TCC podría capturar el audio igual que SonicRouter; el control de quién tiene
   ese permiso lo gestiona macOS, no esta app.

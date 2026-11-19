@@ -49,6 +49,14 @@ public final class RealtimeRenderer: @unchecked Sendable {
         sr_renderer_set_equalizer(handle, settings.bass, settings.mid, settings.treble)
     }
 
+    /// Callback timing (REN-01-R04). Off by default; see `RenderStats`.
+    public func setStatsEnabled(_ enabled: Bool) { sr_renderer_set_stats_enabled(handle, enabled) }
+    public func stats() -> RenderStats {
+        var raw = sr_render_stats()
+        sr_renderer_read_stats(handle, &raw)
+        return RenderStats(raw)
+    }
+
     /// Renders one block, exactly as the IOProc does. For tests and benchmarks.
     public func render(input: UnsafePointer<AudioBufferList>, output: UnsafeMutablePointer<AudioBufferList>) {
         sr_renderer_render(handle, input, output)
@@ -122,5 +130,71 @@ public enum RenderFormatCheck {
         let nonInterleaved = flags & kAudioFormatFlagIsNonInterleaved != 0
         let expectedFrameBytes = nonInterleaved ? sampleBytes : sampleBytes * format.mChannelsPerFrame
         return format.mBytesPerFrame == expectedFrameBytes
+    }
+}
+
+// MARK: - Callback timing
+
+/// Cumulative IOProc timing of one renderer (REN-01-R04, CAM-003 T6).
+public struct RenderStats: Equatable, Sendable {
+    /// Upper bound in microseconds of each histogram bucket; the last is open.
+    public static let bucketUpperBoundsMicros: [Double] = (0..<(Int(SR_STATS_BUCKETS) - 1)).map { Double(4 << $0) }
+
+    public var callbacks: UInt64 = 0
+    public var totalNanoseconds: UInt64 = 0
+    public var maxNanoseconds: UInt64 = 0
+    public var overHalfBudget: UInt64 = 0
+    public var overBudget: UInt64 = 0
+    public var buckets: [UInt64] = Array(repeating: 0, count: Int(SR_STATS_BUCKETS))
+
+    public init() {}
+
+    init(_ raw: sr_render_stats) {
+        callbacks = raw.callbacks
+        totalNanoseconds = raw.total_ns
+        maxNanoseconds = raw.max_ns
+        overHalfBudget = raw.over_half_budget
+        overBudget = raw.over_budget
+        buckets = withUnsafeBytes(of: raw.buckets) { Array($0.bindMemory(to: UInt64.self)) }
+    }
+
+    public var meanMicros: Double {
+        callbacks == 0 ? 0 : Double(totalNanoseconds) / Double(callbacks) / 1000
+    }
+
+    /// Upper bound (µs) of the bucket holding the given percentile (0…1);
+    /// `.infinity` if it falls in the open last bucket, 0 with no data.
+    public func percentileMicros(_ fraction: Double) -> Double {
+        let total = buckets.reduce(0, +)
+        guard total > 0 else { return 0 }
+        let rank = UInt64((Double(total) * min(max(fraction, 0), 1)).rounded(.up))
+        var seen: UInt64 = 0
+        for (index, count) in buckets.enumerated() {
+            seen += count
+            if seen >= max(rank, 1) {
+                return index < Self.bucketUpperBoundsMicros.count ? Self.bucketUpperBoundsMicros[index] : .infinity
+            }
+        }
+        return .infinity
+    }
+
+    /// Counters accumulated since `earlier` (max stays cumulative).
+    public func since(_ earlier: RenderStats) -> RenderStats {
+        var delta = self
+        delta.callbacks -= min(callbacks, earlier.callbacks)
+        delta.totalNanoseconds -= min(totalNanoseconds, earlier.totalNanoseconds)
+        delta.overHalfBudget -= min(overHalfBudget, earlier.overHalfBudget)
+        delta.overBudget -= min(overBudget, earlier.overBudget)
+        delta.buckets = zip(buckets, earlier.buckets).map { $0 - min($0, $1) }
+        return delta
+    }
+
+    /// One log line, `key=value` pairs, parsed by `Scripts/render-stats.sh`.
+    public var logFields: String {
+        String(
+            format: "callbacks=%llu meanUs=%.1f p50Us=%.0f p99Us=%.0f maxUs=%.1f overHalf=%llu overBudget=%llu",
+            callbacks, meanMicros, percentileMicros(0.5), percentileMicros(0.99),
+            Double(maxNanoseconds) / 1000, overHalfBudget, overBudget
+        )
     }
 }

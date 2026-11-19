@@ -15,6 +15,9 @@ step "Sin red ni escritura en el audio (SEG-01-R05)"
 Scripts/check-security.sh --selftest
 Scripts/check-security.sh
 
+step "Lint de Swift"
+Scripts/lint.sh
+
 step "Compilación estricta"
 swift build -Xswiftc -warnings-as-errors
 

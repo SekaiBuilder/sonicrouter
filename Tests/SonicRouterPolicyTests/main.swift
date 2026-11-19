@@ -816,6 +816,109 @@ private func runCppEquivalenceTests(_ tests: inout TestState) {
     }
 }
 
+/// REN-01-R04: callback timing is off by default, counts every IOProc call
+/// when on, and never changes the audio.
+private func runRenderStatsTests(_ tests: inout TestState) {
+    let frames = 256
+    let samples = [renderTestSamples(count: 2 * frames, seed: 41)]
+    let map = OutputChannelMap(deviceChannelCounts: [2])
+    guard let timed = RealtimeRenderer(sampleRate: 48_000, gain: 0.5, makeup: 1, equalizer: .flat, channelMap: map),
+          let plain = RealtimeRenderer(sampleRate: 48_000, gain: 0.5, makeup: 1, equalizer: .flat, channelMap: map)
+    else {
+        tests.expect(false, "renderers for stats tests")
+        return
+    }
+    let input = TestBufferList(layout: [2], frames: frames, samples: samples)
+    let timedOutput = TestBufferList(layout: [2], frames: frames)
+    let plainOutput = TestBufferList(layout: [2], frames: frames)
+    func callIOProc(_ renderer: RealtimeRenderer, _ output: TestBufferList) {
+        var now = AudioTimeStamp()
+        _ = RealtimeRenderer.ioProc(0, &now, input.list.unsafePointer, &now, output.list.unsafeMutablePointer, &now, renderer.clientData)
+    }
+    callIOProc(timed, timedOutput)
+    tests.expect(timed.stats().callbacks == 0, "stats are off by default")
+    timed.setStatsEnabled(true)
+    for _ in 0..<10 {
+        callIOProc(timed, timedOutput)
+        callIOProc(plain, plainOutput)
+    }
+    let stats = timed.stats()
+    tests.expect(stats.callbacks == 10, "stats count every IOProc call (got \(stats.callbacks))")
+    tests.expect(stats.buckets.reduce(0, +) == 10, "histogram holds every call")
+    tests.expect(stats.maxNanoseconds > 0 && stats.totalNanoseconds >= stats.maxNanoseconds, "stats record durations")
+    tests.expect(timedOutput.samples(0) == plainOutput.samples(0), "timing does not change the audio")
+    timed.setStatsEnabled(false)
+    callIOProc(timed, timedOutput)
+    tests.expect(timed.stats().callbacks == 10, "disabling stats stops counting")
+
+    var synthetic = RenderStats()
+    synthetic.buckets[0] = 90  // < 4 µs
+    synthetic.buckets[3] = 9  // < 32 µs
+    synthetic.buckets[11] = 1  // ≥ 4096 µs
+    tests.expect(synthetic.percentileMicros(0.5) == 4, "p50 is the bucket bound")
+    tests.expect(synthetic.percentileMicros(0.99) == 32, "p99 is the bucket bound")
+    tests.expect(synthetic.percentileMicros(1.0) == .infinity, "the open bucket has no bound")
+    tests.expect(RenderStats().percentileMicros(0.5) == 0, "no data gives 0")
+    var later = synthetic
+    later.callbacks = 15
+    later.buckets[0] = 95
+    synthetic.callbacks = 10
+    let delta = later.since(synthetic)
+    tests.expect(delta.callbacks == 5 && delta.buckets[0] == 5 && delta.buckets[3] == 0, "since() subtracts counters")
+    tests.expect(stats.logFields.hasPrefix("callbacks=10 meanUs="), "log line format")
+}
+
+/// Plan A8: preferences carried from the old domain into a new one.
+private func runPreferenceMigrationTests(_ tests: inout TestState) {
+    let old: [String: Any] = [
+        "SonicRouter.Language": "ja",
+        "SonicRouter.RouteProfiles": Data([1, 2, 3]),
+        "SonicRouter.VolumeCompensation.v5": 1.25,
+        "SonicRouter.StartInMenuBar": true,
+        "NSWindow Frame main": "0 0 800 600",
+        "AppleLanguages": ["es"],
+    ]
+    let fresh = PreferenceMigration.plan(old: old, current: [:], from: "local.sonicrouter.app")
+    tests.expect(fresh?["SonicRouter.Language"] as? String == "ja", "migration copies SonicRouter keys")
+    tests.expect(fresh?["SonicRouter.RouteProfiles"] as? Data == Data([1, 2, 3]), "migration copies profile data unchanged")
+    tests.expect(fresh?["SonicRouter.VolumeCompensation.v5"] as? Double == 1.25, "migration keeps the v5 compensation key")
+    tests.expect(fresh?["NSWindow Frame main"] == nil && fresh?["AppleLanguages"] == nil, "migration ignores non-SonicRouter keys")
+    tests.expect(fresh?[PreferenceMigration.markerKey] as? String == "local.sonicrouter.app", "migration records where it came from")
+    tests.expect(fresh?.count == 5, "migration writes 4 keys plus the marker")
+
+    let existing = PreferenceMigration.plan(old: old, current: ["SonicRouter.Language": "en"], from: "local.sonicrouter.app")
+    tests.expect(existing?["SonicRouter.Language"] == nil, "migration never overwrites a value the new install has")
+    tests.expect(existing?["SonicRouter.StartInMenuBar"] as? Bool == true, "migration still copies the missing keys")
+
+    let done = PreferenceMigration.plan(old: old, current: [PreferenceMigration.markerKey: "x"], from: "local.sonicrouter.app")
+    tests.expect(done == nil, "migration runs only once")
+    tests.expect(PreferenceMigration.plan(old: ["Other": 1], current: [:], from: "x") == nil, "nothing to migrate: no marker written")
+    tests.expect(
+        PreferenceMigration.plan(old: ["SonicRouter.Bad": NSObject()], current: [:], from: "x")?["SonicRouter.Bad"] == nil,
+        "migration skips values that are not property lists"
+    )
+
+    // Real defaults, in throwaway domains.
+    let suffix = UUID().uuidString
+    let oldDomain = "local.sonicrouter.migrationtest.old.\(suffix)"
+    let newDomain = "local.sonicrouter.migrationtest.new.\(suffix)"
+    guard let defaults = UserDefaults(suiteName: newDomain) else {
+        tests.expect(false, "could not open test defaults")
+        return
+    }
+    defaults.setPersistentDomain(["SonicRouter.Language": "ja", "SonicRouter.StartInMenuBar": true], forName: oldDomain)
+    defaults.set("en", forKey: "SonicRouter.Language")
+    let copied = PreferenceMigration.migrate(from: oldDomain, currentDomain: newDomain, defaults: defaults)
+    tests.expect(copied == ["SonicRouter.StartInMenuBar"], "migrate copies only the missing key (got \(copied))")
+    tests.expect(defaults.string(forKey: "SonicRouter.Language") == "en", "migrate keeps the new value")
+    tests.expect(defaults.bool(forKey: "SonicRouter.StartInMenuBar"), "migrate makes the old value readable")
+    tests.expect(PreferenceMigration.migrate(from: oldDomain, currentDomain: newDomain, defaults: defaults).isEmpty, "second launch does nothing")
+    tests.expect(PreferenceMigration.migrate(from: oldDomain, currentDomain: oldDomain, defaults: defaults).isEmpty, "same domain does nothing")
+    tests.expect(PreferenceMigration.migrate(from: oldDomain, currentDomain: nil, defaults: defaults).isEmpty, "no bundle ID does nothing")
+    defaults.removePersistentDomain(forName: oldDomain)
+    defaults.removePersistentDomain(forName: newDomain)
+}
+
 private var tests = TestState()
 runPolicyTests(&tests)
 runEqualizerSettingsTests(&tests)
@@ -828,6 +931,8 @@ runRealtimeRenderTests(&tests)
 runRenderFormatCheckTests(&tests)
 runDeviceStreamMapTests(&tests)
 runCppEquivalenceTests(&tests)
+runPreferenceMigrationTests(&tests)
+runRenderStatsTests(&tests)
 
 if tests.failures.isEmpty {
     print("SonicRouter policy tests passed: \(tests.checks) checks")

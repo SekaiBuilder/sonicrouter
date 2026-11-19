@@ -20,7 +20,7 @@ Lo demás solo está anotado en comentarios:
 
 | Dato | Fuente | Evidencia |
 |---|---|---|
-| Retardo tap → altavoz de ~66 ms, ~50 ms con búfer de 256 tramas | `AudioProcessTap.swift:850` | Comentario; sin método ni fecha |
+| Retardo tap → altavoz de ~66 ms, ~50 ms con búfer de 256 tramas | `AudioProcessTap.swift:851` | Comentario; sin método ni fecha |
 | «128 tramas ganaba pocos ms con más CPU» | ídem | Comentario |
 | El README dice «un par de milisegundos» | `README.md` | Contradice lo anterior |
 
@@ -34,7 +34,18 @@ que sí es requisito desde ya:
 | REN-01-R01 | Ninguna afirmación de mejora sin medición antes y después con el mismo método | Objetivo |
 | REN-01-R02 | Sin ventana y sin controles activos, la app no tiene escuchas ni temporizadores (APP-01-R16) | Actual, código leído |
 | REN-01-R03 | El callback de audio no reserva memoria ni toma locks (CTR-01) | Actual por diseño; desde CAM-003 el objeto del núcleo no enlaza Swift ni reserva fuera de crear y destruir (`nm -u`). Sin medir en Mac real (AUD-01-B02) |
-| REN-01-R04 | Cero sobrecargas de E/S (`kAudioDeviceProcessorOverload`) en una hora con 5 apps controladas | Objetivo |
+| REN-01-R04 | Cero sobrecargas de E/S (`kAudioDeviceProcessorOverload`) en una hora con 5 apps controladas | Objetivo; **arnés listo 2026-11-19** |
+
+Arnés de REN-01-R04 (2026-11-19, sin ejecutar con audio real):
+`defaults write local.sonicrouter.app SonicRouter.RenderStats -bool YES` y
+reiniciar la app. Cada motor de volumen mide su IOProc (dos lecturas de reloj
+y sumas atómicas; el audio no cambia, comprobado en `runRenderStatsTests`) y
+cada 10 s escribe en el log llamadas, media, p50/p99 por histograma (cubos
+de 4 µs a 4 ms), máximo, llamadas por encima de la mitad del presupuesto y
+del presupuesto entero, y las sobrecargas que Core Audio notifica en su
+agregado. `Scripts/render-stats.sh [--last 1h]` lo resume y falla si hubo
+llamadas fuera de tiempo o sobrecargas. Desactivado por defecto: sin la
+preferencia, el IOProc no lee el reloj.
 
 ## Plan de medición de referencia
 

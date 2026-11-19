@@ -11,6 +11,12 @@
 | Compilación estricta | `swift build -Xswiftc -warnings-as-errors` | Ejecutada el 2026-11-18 en la rama de CAM-001: OK |
 | Seguridad estática | `Scripts/check-security.sh` (`--selftest`) | SEG-01-R05: sin red en `Sources/`, sin escritura de archivos en el audio |
 | Verificación del paquete | `Scripts/verify-app.sh [app] [--arm64-only] [--store]` | `Info.plist` y textos del permiso en es/en/ja, icono, `PrivacyInfo.xcprivacy` (SEG-01-R03), arquitecturas, macOS mínimo, firma estricta; con `--store`, firma con identidad, Hardened Runtime y entitlements iguales a `Config/SonicRouter-MAS.entitlements` |
+| Migración de preferencias | En `Scripts/test.sh` (`runPreferenceMigrationTests`) | Plan A8: copia solo `SonicRouter.*`, no pisa valores nuevos, una sola vez; con dominios de prueba reales |
+| Tiempo del callback | En `Scripts/test.sh` (`runRenderStatsTests`); en la app, `SonicRouter.RenderStats` + `Scripts/render-stats.sh` | REN-01-R04: cuenta cada llamada, histograma, el audio no cambia |
+| Objetos de audio de SonicRouter | `swift run SonicRouterAudioTools objects | orphans` | CAM-002-A17: solo lectura; ve los objetos públicos (los privados de otro proceso no son visibles) |
+| Arnés de CAM-002 | `Scripts/cam002-sandbox.sh prepare | start | stop | restore` | Copia con sandbox firmada ad hoc en `build/sandbox/`, registro del sandbox, hoja de resultados A01–A18; guarda y restaura las preferencias de la app normal |
+| Lint de Swift | `Scripts/lint.sh` | Reglas de swift-format en todo; formato estricto solo en archivos nuevos (el código antiguo no se reformatea) |
+| Publicación | `Scripts/release-mas.sh [--upload]`, `Scripts/release-direct.sh` | Esqueletos: se niegan a correr sin `Config/Signing.xcconfig` ignorado por git |
 | Todo lo anterior junto | `Scripts/ci.sh`; en GitHub, `.github/workflows/ci.yml` lo ejecuta en cada push y PR | Specs (`Scripts/sdd-deriva.py --estricto`, copia del script de la skill `sdd`), seguridad, compilación estricta, pruebas en debug, release y ASan/UBSan, autoprueba de la prueba nula, paquete universal y su verificación |
 
 Sin cobertura: motor de audio, clientes Core Audio, stores, interfaz, atajos,
@@ -77,10 +83,10 @@ Por orden de valor (tachadas las ya hechas):
 | ~~Prueba sin red ni escritura~~ | Hecho 2026-11-18 (`Scripts/check-security.sh`) | — |
 | ~~Verificador del paquete~~ | Hecho 2026-11-18 (`Scripts/verify-app.sh`) | — |
 | ~~`PrivacyInfo.xcprivacy`~~ | Hecho 2026-11-18 (`Config/PrivacyInfo.xcprivacy`) | — |
-| Script del arnés de CAM-002 (firma ad hoc, `log stream` del sandbox) | CAM-002 | Prepararlo sí; ejecutarlo no |
-| Prueba de migración de preferencias al contenedor | RIE-06, plan A8 | Sí, con dominio falso |
-| Detector de taps y agregados huérfanos | CAM-002-A17 | No |
-| Medición del callback (`os_signpost`, sobrecargas, p50/p99) | REN-01-R04, CAM-003 T6 | Instrumentar sí; medir no |
+| ~~Arnés de CAM-002~~ | Hecho 2026-11-19 (`Scripts/cam002-sandbox.sh`) | — |
+| ~~Migración de preferencias~~ | Hecho 2026-11-19 (`runPreferenceMigrationTests`) | — |
+| ~~Detector de huérfanos~~ | Hecho 2026-11-19 (`SonicRouterAudioTools orphans`) | — |
+| ~~Medición del callback~~ | Hecho 2026-11-19 (contadores en C++, `Scripts/render-stats.sh`); medir necesita al titular | — |
 | Sesión larga (8 h: sobrecargas, memoria, objetos de audio) | performance.md | No |
-| Scripts de archivo, subida y notarización | Plan B2–B4 | Esqueleto sí |
-| Formato y lint (swift-format, clang-format) | Compilación estricta | Sí |
+| ~~Scripts de subida y notarización~~ | Esqueleto 2026-11-19 (`Scripts/release-mas.sh`, `release-direct.sh`); B4 (publicar desde CI) sigue abierto | — |
+| ~~Lint de Swift~~ | Hecho 2026-11-19 (`Scripts/lint.sh`, `.swift-format`, solo comprobación); C++ sin lint (sin clang-format, decisión del titular) | — |

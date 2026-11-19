@@ -65,6 +65,14 @@ else
   bad "falta o no es válido PrivacyInfo.xcprivacy"
 fi
 
+# Sandbox container migration (plan A8)
+MIGRATION="$CONTENTS/Resources/container-migration.plist"
+if [[ -f "$MIGRATION" ]] && plutil -lint -s "$MIGRATION" && grep -q 'Preferences/local.sonicrouter.app.plist' "$MIGRATION"; then
+  ok "container-migration.plist mueve las preferencias antiguas"
+else
+  bad "falta o no es válido container-migration.plist"
+fi
+
 # Architectures
 archs="$(lipo -archs "$BINARY" 2>/dev/null | tr ' ' '\n' | sort | xargs)"
 want="$(echo "$EXPECT_ARCHS" | tr ' ' '\n' | sort | xargs)"

@@ -87,25 +87,25 @@ Rosetta 2; la app Intel no se ha ejecutado. Mantenerlo es
 
 | # | Tarea | Estado |
 |---|---|---|
-| A1 | Línea base de specs | En curso |
+| A1 | Línea base de specs | Completa en cobertura de archivos (2026-11-19: dispositivos DEV-01, interfaz UI-01, trazabilidad); profundidad por archivo en specs/README.md |
 | A2 | CAM-002: prueba de sandbox con firma ad hoc | Preparada; necesita al titular delante del Mac |
 | A3 | CAM-001: sonido transparente | Aprobado 2026-11-18; T1–T3 hechos; herramienta de T4 escrita; ejecutar T4 y T5 necesita al titular |
 | A4 | Arnés de medición y primera línea de referencia | Sin empezar |
 | A5 | Pruebas automáticas nuevas y CI | CI escrita (`Scripts/ci.sh`, `.github/workflows/ci.yml`), pasa en local; sin ejecutar en GitHub. Verificador del paquete `Scripts/verify-app.sh` |
 | A6 | Proyecto Xcode que envuelva el paquete, catálogo de recursos con el icono, `Info.plist` versionado, String Catalogs | Sin empezar; necesita visto bueno (cambia la forma de compilar) |
 | A7 | Manifiesto de privacidad | Hecho: `Config/PrivacyInfo.xcprivacy`, dentro del paquete |
-| A8 | Migración de preferencias al contenedor | Sin empezar |
+| A8 | Migración de preferencias al contenedor | Hecho sin probar con sandbox: `Config/container-migration.plist` + `PreferenceMigration` (17 pruebas); se comprueba en CAM-002-A16 |
 | A9 | Textos de la ficha en es/en/ja, notas de revisión, política de privacidad | Borrador en [`docs/store/metadata.md`](store/metadata.md) |
 | A10 | Capturas de pantalla | Sin empezar; necesita la app en marcha |
-| A11 | Corregir README (latencia) y `SECURITY.md` §5 | Tras CAM-001 y CAM-002 |
+| A11 | Corregir README (latencia) y `SECURITY.md` §5 | Hecho 2026-11-19 con lo que se sabe; §5 se cierra con el resultado de CAM-002 |
 
 ### B. Preparables en parte (faltan datos)
 
 | # | Tarea | Falta |
 |---|---|---|
 | B1 | `Config/Signing.xcconfig` | Team ID, bundle ID. Plantilla en `Config/Signing.xcconfig.example` |
-| B2 | Script de archivo, exportación y subida (`xcodebuild archive`, `-exportArchive`, `altool`/Transporter) | Identidades de firma |
-| B3 | Script de notarización del canal directo | Perfil de `notarytool` |
+| B2 | Script de paquete y subida a la tienda: `Scripts/release-mas.sh` (firma con perfil y entitlements, `productbuild`, `verify-app.sh --store`, `altool`) | Esqueleto 2026-11-19; faltan identidades, perfil y B6. Sin proyecto Xcode: firma el paquete de SwiftPM |
+| B3 | Notarización del canal directo: `Scripts/release-direct.sh` (Developer ID, notarytool, stapler, zip y SHA-256) | Esqueleto 2026-11-19; falta el perfil de `notarytool` y B6 |
 | B4 | Flujo de publicación en CI | Secretos de firma; decidir si se firma en CI o en local |
 | B5 | Ficha en App Store Connect | Nombre disponible, URL de soporte y de privacidad, precio |
 | B6 | Añadir `Config/Signing.xcconfig` a `.gitignore` | Solo visto bueno |

@@ -23,7 +23,7 @@ cambia con la tienda.
 | Red | Ninguna |
 | Archivos | Solo los que el usuario elige en paneles de importar y exportar; límite de 5 MB y 1.000 entradas |
 | Atajos | Carbon, sin Accesibilidad ni Monitorización de entrada |
-| Registro (`Logger`) | Nombres de app y PID con privacidad `.public` en `AudioProcessTap.swift:741`, `:886` |
+| Registro (`Logger`) | Nombres de app y PID con privacidad `.public` en `AudioProcessTap.swift:742`, `:890` |
 
 ## Requisitos objetivo
 

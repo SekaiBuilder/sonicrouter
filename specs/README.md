@@ -36,6 +36,9 @@ dependencia nuevos, retirar o degradar una función, publicar.
 | [features/app-sessions.md](features/app-sessions.md) | `APP-01` Detección de apps, control, energía | Leído a fondo |
 | [features/profiles.md](features/profiles.md) | `PRF-01` Perfiles, exportar e importar | Lógica leída a fondo |
 | [features/system-integration.md](features/system-integration.md) | `SIS-01` Permiso, atajos, inicio, barra de menús | Leído a fondo |
+| [features/devices.md](features/devices.md) | `DEV-01` Dispositivos, volumen del sistema y salida múltiple | Leído a fondo (2026-11-19) |
+| [features/interface.md](features/interface.md) | `UI-01` Ventana, barra de menús, ajustes, idiomas y accesibilidad | Leído a fondo (2026-11-19) |
+| [trazabilidad.md](trazabilidad.md) | Requisito → prueba o herramienta | Por grupo de pruebas (2026-11-19) |
 | [interfaces/README.md](interfaces/README.md) | `CTR-NN` Contratos | Primera versión |
 | [security.md](security.md) | `SEG-01` Estado de los invariantes y objetivos de tienda | Primera versión |
 | [performance.md](performance.md) | `REN-01` Lo medido (nada) y plan de medición | Primera versión |
@@ -49,9 +52,8 @@ dependencia nuevos, retirar o degradar una función, publicar.
 | [../docs/APP_STORE_MIGRATION.md](../docs/APP_STORE_MIGRATION.md) | Seguimiento de la migración a la tienda | En curso |
 | [../docs/store/metadata.md](../docs/store/metadata.md) | Ficha, notas de revisión, política de privacidad | Borrador |
 
-Pendientes de escribir: specs de dispositivos (`CoreAudioClient.swift`,
-`AudioDeviceStore.swift`, multi-salida) y de interfaz (`*View.swift`,
-`Commands.swift`), y la trazabilidad requisito → prueba.
+Desde el 2026-11-19 todos los archivos de código tienen spec (DEV-01, UI-01).
+Pendiente: afinar la trazabilidad caso a caso donde se vaya a cambiar código.
 
 ## Cobertura de lectura
 
@@ -72,6 +74,9 @@ Pendientes de escribir: specs de dispositivos (`CoreAudioClient.swift`,
 | `Package.swift`, `Scripts/build-app.sh`, `Scripts/test.sh`, README, SECURITY, CONTRIBUTING, roadmap | A fondo |
 | `Scripts/ci.sh`, `Scripts/check-security.sh`, `Scripts/verify-app.sh`, `.github/workflows/ci.yml`, `Config/PrivacyInfo.xcprivacy` (nuevos, 2026-11-18) | A fondo (ver [testing.md](testing.md)) |
 | `Scripts/sdd-deriva.py` | Copia literal del script de la skill `sdd`, para la CI |
+| `Scripts/lint.sh`, `.swift-format`, `Scripts/render-stats.sh`, `Scripts/cam002-sandbox.sh`, `Scripts/release-common.sh`, `Scripts/release-mas.sh`, `Scripts/release-direct.sh`, `Config/container-migration.plist`, `Sources/SonicRouterCore/PreferenceMigration.swift`, `Tests/SonicRouterAudioTools/` (nuevos, 2026-11-19) | A fondo (ver [testing.md](testing.md)) |
+| `Sources/SonicRouter/CoreAudioClient.swift`, `AudioDeviceStore.swift`, `DeviceMixerView.swift`, `MultiOutputPlan.swift` | A fondo, para [DEV-01](features/devices.md) |
+| `Sources/SonicRouter/*View.swift`, `SharedViews.swift`, `Commands.swift`, `Localization.swift`, `Scripts/make-icon.swift` | A fondo, para [UI-01](features/interface.md) |
 | Resto de `Sources/` y `Tests/` | No leído o solo por nombres |
 
 ## Identificadores

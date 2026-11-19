@@ -138,7 +138,7 @@ Por comprobar antes de dar el diseño por bueno:
 | T3 | Tap de flujo de dispositivo y montaje sin deriva (R01–R03) | **Escrito 2026-11-18**; falta probarlo con el titular (T4, T5) |
 | T4 | `SonicRouterNullTest` (A03–A05) | **Escrita 2026-11-18** y autoprueba en verde; ejecutarla necesita al titular (permiso de captura para Terminal) |
 | T5 | Escucha comparada (A07) y sesión larga | Sí |
-| T6 | Actualizar AUD-01, README y SECURITY | No |
+| T6 | Actualizar AUD-01, README y SECURITY | **Hecho 2026-11-19, sin verificar con audio real** (decisión del titular): README describe el montaje transparente y la latencia anotada en el código; SECURITY apunta al núcleo C++, corrige §5 (sandbox sin probar, cambios del sistema) y anota la excepción del multi-salida. Se revisa tras T4 y T5 |
 
 ## Riesgos
 

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Plan A8. Only read by macOS on the first launch with App Sandbox: moves
+     the preferences of the version without sandbox into the container.
+     Keeps the old file name; if the bundle ID changes (DEC-104),
+     PreferenceMigration copies the keys into the new domain.
+     Unverified: to be checked in CAM-002 (A16). -->
+<plist version="1.0">
+<dict>
+	<key>Move</key>
+	<array>
+		<string>${Library}/Preferences/local.sonicrouter.app.plist</string>
+	</array>
+</dict>
+</plist>

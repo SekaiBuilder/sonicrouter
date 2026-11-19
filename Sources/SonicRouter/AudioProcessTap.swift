@@ -644,6 +644,7 @@ final class AppVolumeTap {
     /// C++ render state (`SonicRouterDSP`) that the C IOProc reads. Released
     /// only after the IOProc has been stopped and destroyed.
     private var renderer: RealtimeRenderer?
+    private var statsMonitor: RenderStatsMonitor?
     private var storedGain: Float
     private var storedMakeup: Float
     private var storedEqualizer: AudioEqualizerSettings
@@ -859,6 +860,9 @@ final class AppVolumeTap {
             throw TapError.coreAudio(.startVolume, startStatus)
         }
         self.mode = mode
+        if UserDefaults.standard.bool(forKey: RenderStatsMonitor.preferenceKey) {
+            statsMonitor = RenderStatsMonitor(renderer: renderer, aggregateID: aggregateID, pid: pid, mode: mode.description)
+        }
         tapLog.notice("Volume engine active for pid \(self.pid): \(mode.description, privacy: .public), \(outputs.count) device(s) at \(sampleRate) Hz")
         logStreamFormats()
     }
@@ -901,6 +905,8 @@ final class AppVolumeTap {
     }
 
     func invalidate() {
+        statsMonitor?.stop()
+        statsMonitor = nil
         if let ioProcID, aggregateID != kAudioObjectUnknown {
             AudioDeviceStop(aggregateID, ioProcID)
             AudioDeviceDestroyIOProcID(aggregateID, ioProcID)
@@ -917,5 +923,81 @@ final class AppVolumeTap {
         // Only now, with the IOProc gone, may the C++ state it reads be freed.
         renderer = nil
         mode = nil
+    }
+}
+
+// MARK: - Callback timing (REN-01-R04, CAM-003 T6)
+
+/// Hidden diagnostic, off by default: `defaults write local.sonicrouter.app
+/// SonicRouter.RenderStats -bool YES`, then restart the engine. Every 10 s it
+/// logs the IOProc timing of one engine and the overloads Core Audio reported
+/// on its aggregate. `Scripts/render-stats.sh` summarizes the log.
+final class RenderStatsMonitor: @unchecked Sendable {
+    static let preferenceKey = "SonicRouter.RenderStats"
+
+    private let renderer: RealtimeRenderer
+    private let aggregateID: AudioObjectID
+    private let pid: pid_t
+    private let mode: String
+    private let queue = DispatchQueue(label: "local.sonicrouter.render-stats", qos: .utility)
+    private var timer: DispatchSourceTimer?
+    private var overloadListener: AudioObjectPropertyListenerBlock?
+    private var overloads = 0
+    private var last = RenderStats()
+
+    private static var overloadAddress: AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress(
+            mSelector: kAudioDeviceProcessorOverload,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+    }
+
+    init(renderer: RealtimeRenderer, aggregateID: AudioObjectID, pid: pid_t, mode: String) {
+        self.renderer = renderer
+        self.aggregateID = aggregateID
+        self.pid = pid
+        self.mode = mode
+        renderer.setStatsEnabled(true)
+
+        var address = Self.overloadAddress
+        let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in self?.overloads += 1 }
+        if AudioObjectAddPropertyListenerBlock(aggregateID, &address, queue, listener) == noErr {
+            overloadListener = listener
+        }
+
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 10, repeating: 10)
+        timer.setEventHandler { [weak self] in self?.report() }
+        timer.resume()
+        self.timer = timer
+    }
+
+    private func report() {
+        let now = renderer.stats()
+        let delta = now.since(last)
+        last = now
+        let buckets = delta.buckets.map(String.init).joined(separator: ",")
+        tapLog.notice("""
+        render-stats pid=\(self.pid, privacy: .public) \(delta.logFields, privacy: .public) \
+        overloads=\(self.overloads, privacy: .public) buckets=\(buckets, privacy: .public) \
+        mode=\(self.mode, privacy: .public)
+        """)
+        overloads = 0
+    }
+
+    /// Call before the IOProc and the renderer go away.
+    func stop() {
+        queue.sync {
+            timer?.cancel()
+            timer = nil
+            report()
+        }
+        if let overloadListener {
+            var address = Self.overloadAddress
+            AudioObjectRemovePropertyListenerBlock(aggregateID, &address, queue, overloadListener)
+        }
+        overloadListener = nil
+        renderer.setStatsEnabled(false)
     }
 }

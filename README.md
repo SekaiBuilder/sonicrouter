@@ -43,10 +43,12 @@ Los Process Taps requieren el permiso de **captura de audio del sistema** (TCC).
 
 ## Volumen por app
 
-macOS **no tiene una API pública de volumen por aplicación**, así que SonicRouter lo hace como SoundSource: captura el audio de la app con un process tap, silencia su salida original y la **re-emite al volumen elegido** mediante un dispositivo agregado privado. Todo ocurre en un solo IOProc dentro del mismo dominio de reloj (la salida real), así que solo añade un par de milisegundos de latencia a esa app.
+macOS **no tiene una API pública de volumen por aplicación**, así que SonicRouter captura el audio de la app con un process tap, silencia su salida original y la **re-emite al volumen elegido** mediante un dispositivo agregado privado. La re-emisión añade latencia a esa app: el búfer es de 256 tramas y el código anota unos 50 ms medidos en total (sin medición formal todavía).
+
+**Calidad del sonido.** Cuando la app suena en el mismo dispositivo al que se re-emite (el caso normal), SonicRouter captura el flujo de ese dispositivo tal cual: sin mezclar a estéreo, sin remuestrear y sin cambiar la frecuencia del hardware, canal a canal. Las muestras solo se multiplican por la ganancia (y pasan por el ecualizador si lo activas). Las pruebas automáticas comprueban que la copia es exacta bit a bit; la prueba con audio real (`SonicRouterNullTest`) y la escucha comparada están pendientes. Si ese montaje no es posible (otra salida, varias salidas), se usa el anterior: mezcla estéreo con compensación de deriva.
 
 - **Mute** (`MuteEngine`): el IOProc descarta el audio y emite silencio. Inmediato, sin latencia.
-- **Volumen** (`AppVolumeTap`): el mismo montaje, pero el IOProc copia el audio multiplicado por la ganancia.
+- **Volumen** (`AppVolumeTap`): el mismo montaje, pero el IOProc copia el audio multiplicado por la ganancia. El IOProc y el procesado son C++ (`Sources/SonicRouterDSP`), sin reservas de memoria ni locks.
 - **Ecualizador** (`RealtimeEqualizer`): en esa misma re-emisión, tres filtros biquad (estante de graves a 100 Hz, campana de medios a 1 kHz y estante de agudos a 8 kHz) calculados para la frecuencia de muestreo de la salida. Los cambios se deslizan en unos milisegundos y un ecualizador plano no toca las muestras.
 
 Al volver al 100% en la salida predeterminada, SonicRouter desmonta el tap y restaura de inmediato la ruta nativa de la app. Entre 1% y 99% usa una ruta de captura y re-emisión con ganancia **lineal**. La compensación recupera parte del nivel perdido usando solo el margen disponible en cada bloque; un limitador reduce la ganancia antes de que un pico pueda recortarse. Una salida elegida explícitamente o un ecualizador activo mantienen el motor incluso al 100%, porque siguen necesitando procesar el audio.

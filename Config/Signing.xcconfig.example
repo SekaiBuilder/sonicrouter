@@ -23,3 +23,11 @@ CODE_SIGN_IDENTITY_DIRECT = Developer ID Application
 // Perfil de notarytool guardado en el llavero con
 // `xcrun notarytool store-credentials`. Solo el nombre del perfil.
 NOTARY_KEYCHAIN_PROFILE =
+
+// Ruta al perfil de aprovisionamiento de la tienda (.provisionprofile),
+// fuera del repositorio. Lo usa Scripts/release-mas.sh.
+PROVISIONING_PROFILE_MAS =
+
+// Perfil del llavero para subir con altool (`xcrun altool --store-password-in-keychain-item`
+// o clave de API de App Store Connect). Solo el nombre.
+ASC_KEYCHAIN_PROFILE =

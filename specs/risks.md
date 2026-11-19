@@ -9,7 +9,7 @@ Fecha: 2026-11-15. Probabilidad e impacto: alta, media, baja.
 | RIE-03 | Sin compensación de deriva aparecen clics (CAM-001) | Media | Alto | Prueba de residuo y sesión larga por tipo de dispositivo; mantener la deriva donde haga falta |
 | RIE-04 | Apple cambia el comportamiento de los taps en una versión de macOS | Media | Alto | Comprobación de formato (CAM-001-R05), registro de formatos ya existente, recorrido manual en cada versión mayor |
 | RIE-05 | Regresiones al tocar el motor sin pruebas | Alta | Alto | Mover la copia de audio al núcleo y cubrirla antes de cambiarla |
-| RIE-06 | El usuario pierde ajustes al pasar a la versión con sandbox | Alta | Medio | Migración de preferencias en el primer arranque |
+| RIE-06 | El usuario pierde ajustes al pasar a la versión con sandbox | Alta | Medio | Migración de preferencias en el primer arranque: `Config/container-migration.plist` (lo lee macOS con sandbox) y `PreferenceMigration` si cambia el bundle ID; probada con dominios falsos, sin probar con sandbox (CAM-002-A16) |
 | RIE-07 | La app se cae con controles activos y deja audio silenciado | Baja | Alto | El sistema destruye los taps al morir el proceso `[POR ACLARAR: comprobar con kill -9]`; limpieza al arrancar |
 | RIE-08 | Reservas ocultas en el callback provocan cortes bajo carga | Baja (desde CAM-003) | Medio | IOProc en C sin Swift (CAM-003); falta medir en Mac real (AUD-01-B02) |
 | RIE-09 | Cambiar la frecuencia del hardware o la salida del sistema molesta al usuario o a la revisión | Media | Medio | CAM-001 lo elimina en el caso común; documentar el resto |

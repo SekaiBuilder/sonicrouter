@@ -89,6 +89,28 @@ void sr_renderer_set_equalizer(sr_renderer *renderer, double bass, double mid, d
 /// Output buffers are always fully written.
 void sr_renderer_render(sr_renderer *renderer, const AudioBufferList *input, AudioBufferList *output);
 
+// MARK: Callback timing (REN-01-R04, CAM-003 T6)
+
+/// Histogram of IOProc durations: bucket i counts callbacks shorter than
+/// `4 << i` microseconds (4 µs … 4096 µs); the last bucket is everything longer.
+#define SR_STATS_BUCKETS 12
+
+typedef struct sr_render_stats {
+    uint64_t callbacks;
+    uint64_t total_ns;
+    uint64_t max_ns;
+    /// Callbacks that took more than half / all of the audio they rendered.
+    uint64_t over_half_budget;
+    uint64_t over_budget;
+    uint64_t buckets[SR_STATS_BUCKETS];
+} sr_render_stats;
+
+/// Off by default. When on, `sr_renderer_ioproc` times each callback (two
+/// clock reads and relaxed atomic adds; the audio is not touched).
+void sr_renderer_set_stats_enabled(sr_renderer *renderer, bool enabled);
+/// Cumulative counters since creation; any thread.
+void sr_renderer_read_stats(const sr_renderer *renderer, sr_render_stats *stats);
+
 /// An `AudioDeviceIOProc`; pass the renderer as client data.
 OSStatus sr_renderer_ioproc(
     uint32_t device,

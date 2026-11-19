@@ -9,6 +9,7 @@
 #include "SonicRouterDSP.h"
 
 #include <Accelerate/Accelerate.h>
+#include <mach/mach_time.h>
 
 #include <algorithm>
 #include <atomic>
@@ -480,8 +481,46 @@ void sr_equalizer_applied(const sr_equalizer *equalizer, double *bass, double *m
 
 double sr_equalizer_sample_rate(const sr_equalizer *equalizer) { return equalizer->sampleRate; }
 
+/// Written only by the render thread (single writer, relaxed); read by
+/// anyone. Kept outside `Renderer` so rendering itself is unchanged.
+struct RenderStats {
+    std::atomic<bool> enabled{false};
+    std::atomic<uint64_t> callbacks{0};
+    std::atomic<uint64_t> totalNs{0};
+    std::atomic<uint64_t> maxNs{0};
+    std::atomic<uint64_t> overHalf{0};
+    std::atomic<uint64_t> overBudget{0};
+    std::atomic<uint64_t> buckets[SR_STATS_BUCKETS] = {};
+    double nsPerTick = 1;
+
+    RenderStats() {
+        mach_timebase_info_data_t timebase{};
+        if (mach_timebase_info(&timebase) == KERN_SUCCESS && timebase.denom != 0) {
+            nsPerTick = double(timebase.numer) / double(timebase.denom);
+        }
+    }
+
+    static void add(std::atomic<uint64_t> &counter, uint64_t value) {
+        counter.store(counter.load(std::memory_order_relaxed) + value, std::memory_order_relaxed);
+    }
+
+    void record(uint64_t elapsedNs, double budgetNs) {
+        add(callbacks, 1);
+        add(totalNs, elapsedNs);
+        if (elapsedNs > maxNs.load(std::memory_order_relaxed)) maxNs.store(elapsedNs, std::memory_order_relaxed);
+        if (budgetNs > 0 && double(elapsedNs) > budgetNs * 0.5) add(overHalf, 1);
+        if (budgetNs > 0 && double(elapsedNs) > budgetNs) add(overBudget, 1);
+        int bucket = 0;
+        const uint64_t micros = elapsedNs / 1000;
+        while (bucket < SR_STATS_BUCKETS - 1 && micros >= (uint64_t(4) << bucket)) ++bucket;
+        add(buckets[bucket], 1);
+    }
+};
+static_assert(std::atomic<uint64_t>::is_always_lock_free, "render stats must be lock-free");
+
 struct sr_renderer : Renderer {
     using Renderer::Renderer;
+    RenderStats stats;
 };
 
 sr_renderer *sr_renderer_create(double sampleRate, float gain, float makeup, double bass, double mid, double treble,
@@ -491,6 +530,20 @@ sr_renderer *sr_renderer_create(double sampleRate, float gain, float makeup, dou
 }
 
 void sr_renderer_destroy(sr_renderer *renderer) { delete renderer; }
+
+void sr_renderer_set_stats_enabled(sr_renderer *renderer, bool enabled) {
+    renderer->stats.enabled.store(enabled, std::memory_order_relaxed);
+}
+
+void sr_renderer_read_stats(const sr_renderer *renderer, sr_render_stats *out) {
+    const RenderStats &stats = renderer->stats;
+    out->callbacks = stats.callbacks.load(std::memory_order_relaxed);
+    out->total_ns = stats.totalNs.load(std::memory_order_relaxed);
+    out->max_ns = stats.maxNs.load(std::memory_order_relaxed);
+    out->over_half_budget = stats.overHalf.load(std::memory_order_relaxed);
+    out->over_budget = stats.overBudget.load(std::memory_order_relaxed);
+    for (int i = 0; i < SR_STATS_BUCKETS; ++i) out->buckets[i] = stats.buckets[i].load(std::memory_order_relaxed);
+}
 
 void sr_renderer_set_gain(sr_renderer *renderer, float gain) { renderer->gain.store(gain, std::memory_order_relaxed); }
 
@@ -510,7 +563,22 @@ void sr_renderer_render(sr_renderer *renderer, const AudioBufferList *input, Aud
 
 OSStatus sr_renderer_ioproc(uint32_t, const AudioTimeStamp *, const AudioBufferList *inputData, const AudioTimeStamp *,
                             AudioBufferList *outputData, const AudioTimeStamp *, void *clientData) {
-    if (clientData) static_cast<sr_renderer *>(clientData)->render(inputData, outputData);
+    if (!clientData) return 0;
+    auto *renderer = static_cast<sr_renderer *>(clientData);
+    if (!renderer->stats.enabled.load(std::memory_order_relaxed)) {
+        renderer->render(inputData, outputData);
+        return 0;
+    }
+    const uint64_t start = mach_absolute_time();
+    renderer->render(inputData, outputData);
+    const uint64_t elapsed = mach_absolute_time() - start;
+    double budgetNs = 0;
+    if (outputData && outputData->mNumberBuffers > 0 && outputData->mBuffers[0].mNumberChannels > 0) {
+        const double frames = double(outputData->mBuffers[0].mDataByteSize) /
+                              (sizeof(float) * outputData->mBuffers[0].mNumberChannels);
+        budgetNs = frames / renderer->equalizer.sampleRate * 1e9;
+    }
+    renderer->stats.record(uint64_t(double(elapsed) * renderer->stats.nsPerTick), budgetNs);
     return 0;
 }
 

@@ -49,8 +49,9 @@ enum NullTestAnalysis {
         guard probeLength > 64, reference.count > probeLength + 2 * maxLag else { return (0, 0) }
         let probeStart = max(maxLag, (captured.count - probeLength) / 2)
         guard probeStart + probeLength <= captured.count,
-              probeStart - maxLag >= 0,
-              probeStart + maxLag + probeLength <= reference.count else { return (0, 0) }
+            probeStart - maxLag >= 0,
+            probeStart + maxLag + probeLength <= reference.count
+        else { return (0, 0) }
 
         let probe = Array(captured[probeStart..<(probeStart + probeLength)])
         // segment[k] = reference[probeStart - maxLag + k]; result[k] = Σ segment[k+p]·probe[p]
@@ -135,7 +136,7 @@ enum NullTestAnalysis {
             report.problems.append("La referencia (lo que emite la app de prueba) llega en silencio.")
             return report
         }
-        let glitchLevel: Float = 1e-3 // −60 dBFS
+        let glitchLevel: Float = 1e-3  // −60 dBFS
 
         for (c, capturedChannel) in captured.enumerated() {
             guard rms(capturedChannel) > 1e-6 else {
@@ -158,7 +159,10 @@ enum NullTestAnalysis {
             var firstGlitch: Int?
             for n in range {
                 let residual = capturedChannel[n] - source[n - best.lag] * gain
-                if residual == 0 { exact += 1; continue }
+                if residual == 0 {
+                    exact += 1
+                    continue
+                }
                 let magnitude = abs(residual)
                 peak = max(peak, magnitude)
                 sumSquares += Double(magnitude) * Double(magnitude)
@@ -189,10 +193,11 @@ enum NullTestAnalysis {
                 report.problems.append("Canal \(c + 1): llega el canal \(best.source + 1) de la app (mezcla o cambio de canales).")
             }
             if result.peakResidualDBFS >= NullTestReport.thresholdDBFS {
-                report.problems.append(String(
-                    format: "Canal %d: residuo de pico %.1f dBFS (límite %.0f).",
-                    c + 1, result.peakResidualDBFS, NullTestReport.thresholdDBFS
-                ))
+                report.problems.append(
+                    String(
+                        format: "Canal %d: residuo de pico %.1f dBFS (límite %.0f).",
+                        c + 1, result.peakResidualDBFS, NullTestReport.thresholdDBFS
+                    ))
             }
             if let hint = gainHint, gain != hint {
                 report.problems.append("Canal \(c + 1): ganancia medida \(gain), esperada \(hint).")
@@ -235,26 +240,33 @@ enum NullTestSelfTest {
             let clean = reemit(reference, lag: 517, gain: 0.99, frames: frames)
             let report = NullTestAnalysis.analyze(reference: reference, captured: clean, gainHint: 0.99)
             check("\(channels) canales, retardo 517, ganancia 0,99: pasa", report.passed)
-            check("\(channels) canales: retardo y ganancia hallados",
-                  report.channels.allSatisfy { $0.lag == 517 && $0.gain == Float(0.99) })
+            check(
+                "\(channels) canales: retardo y ganancia hallados",
+                report.channels.allSatisfy { $0.lag == 517 && $0.gain == Float(0.99) })
             let noHint = NullTestAnalysis.analyze(reference: reference, captured: clean)
             check("\(channels) canales: ganancia exacta sin pista", noHint.passed)
 
             var dithered = clean
             for c in dithered.indices { for n in stride(from: 0, to: frames, by: 3) { dithered[c][n] += 1e-5 } }
-            check("\(channels) canales: ruido de −100 dBFS falla",
-                  !NullTestAnalysis.analyze(reference: reference, captured: dithered, gainHint: 0.99).passed)
+            check(
+                "\(channels) canales: ruido de −100 dBFS falla",
+                !NullTestAnalysis.analyze(reference: reference, captured: dithered, gainHint: 0.99).passed)
 
             var swapped = clean
             swapped.swapAt(0, 1)
-            check("\(channels) canales: canales cambiados fallan",
-                  !NullTestAnalysis.analyze(reference: reference, captured: swapped, gainHint: 0.99).passed)
+            check(
+                "\(channels) canales: canales cambiados fallan",
+                !NullTestAnalysis.analyze(reference: reference, captured: swapped, gainHint: 0.99).passed)
 
             var slipped = clean
-            for c in slipped.indices { slipped[c].remove(at: frames / 2); slipped[c].append(0) }
+            for c in slipped.indices {
+                slipped[c].remove(at: frames / 2)
+                slipped[c].append(0)
+            }
             let slipReport = NullTestAnalysis.analyze(reference: reference, captured: slipped, gainHint: 0.99)
-            check("\(channels) canales: una trama perdida (deriva) falla con clics",
-                  !slipReport.passed && slipReport.channels.allSatisfy { $0.glitchFrames > 0 })
+            check(
+                "\(channels) canales: una trama perdida (deriva) falla con clics",
+                !slipReport.passed && slipReport.channels.allSatisfy { $0.glitchFrames > 0 })
         }
 
         let stereo = noise(channels: 2, frames: frames)
@@ -267,8 +279,9 @@ enum NullTestSelfTest {
         check("Referencia en silencio falla", !NullTestAnalysis.analyze(reference: silent, captured: silent).passed)
 
         let other = reemit(stereo, lag: 100, gain: 0.5, frames: frames)
-        check("Ganancia distinta de la esperada falla",
-              !NullTestAnalysis.analyze(reference: stereo, captured: other, gainHint: 0.99).passed)
+        check(
+            "Ganancia distinta de la esperada falla",
+            !NullTestAnalysis.analyze(reference: stereo, captured: other, gainHint: 0.99).passed)
         return failures
     }
 }

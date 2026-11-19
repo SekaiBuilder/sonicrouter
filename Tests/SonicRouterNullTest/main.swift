@@ -28,16 +28,17 @@ struct Options {
 }
 
 func usage() -> Never {
-    print("""
-    Uso: SonicRouterNullTest [--seconds N] [--wait N] [--gain G] [--capture device|process]
-         SonicRouterNullTest --selftest
+    print(
+        """
+        Uso: SonicRouterNullTest [--seconds N] [--wait N] [--gain G] [--capture device|process]
+             SonicRouterNullTest --selftest
 
-      --seconds N   segundos de captura (5)
-      --wait N      segundos esperando a que SonicRouter controle la app de prueba (120)
-      --gain G      ganancia esperada exacta en Float, p. ej. 0.99 (si no, se mide)
-      --capture     device: todo lo que llega al dispositivo menos la app de prueba (por defecto)
-                    process: solo el proceso de SonicRouter
-    """)
+          --seconds N   segundos de captura (5)
+          --wait N      segundos esperando a que SonicRouter controle la app de prueba (120)
+          --gain G      ganancia esperada exacta en Float, p. ej. 0.99 (si no, se mide)
+          --capture     device: todo lo que llega al dispositivo menos la app de prueba (por defecto)
+                        process: solo el proceso de SonicRouter
+        """)
     exit(2)
 }
 
@@ -71,8 +72,10 @@ func address(
     AudioObjectPropertyAddress(mSelector: selector, mScope: scope, mElement: kAudioObjectPropertyElementMain)
 }
 
-func getValue<T: BitwiseCopyable>(_ objectID: AudioObjectID, _ selector: AudioObjectPropertySelector,
-                 _ scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal, initial: T) -> T? {
+func getValue<T: BitwiseCopyable>(
+    _ objectID: AudioObjectID, _ selector: AudioObjectPropertySelector,
+    _ scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal, initial: T
+) -> T? {
     var propertyAddress = address(selector, scope)
     var value = initial
     var size = UInt32(MemoryLayout<T>.size)
@@ -89,8 +92,10 @@ func getString(_ objectID: AudioObjectID, _ selector: AudioObjectPropertySelecto
     return value.takeRetainedValue() as String
 }
 
-func getObjectList(_ objectID: AudioObjectID, _ selector: AudioObjectPropertySelector,
-                   _ scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal) -> [AudioObjectID] {
+func getObjectList(
+    _ objectID: AudioObjectID, _ selector: AudioObjectPropertySelector,
+    _ scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal
+) -> [AudioObjectID] {
     var propertyAddress = address(selector, scope)
     var size: UInt32 = 0
     guard AudioObjectGetPropertyDataSize(objectID, &propertyAddress, 0, nil, &size) == noErr, size > 0 else { return [] }
@@ -114,8 +119,9 @@ func processObject(pid: pid_t) -> AudioObjectID? {
     var pidValue = pid
     var objectID = AudioObjectID(kAudioObjectUnknown)
     var size = UInt32(MemoryLayout<AudioObjectID>.size)
-    let status = AudioObjectGetPropertyData(systemObject, &propertyAddress,
-                                            UInt32(MemoryLayout<pid_t>.size), &pidValue, &size, &objectID)
+    let status = AudioObjectGetPropertyData(
+        systemObject, &propertyAddress,
+        UInt32(MemoryLayout<pid_t>.size), &pidValue, &size, &objectID)
     return status == noErr && objectID != kAudioObjectUnknown ? objectID : nil
 }
 
@@ -138,7 +144,7 @@ func outputChannelCount(_ device: AudioObjectID) -> Int {
     defer { raw.deallocate() }
     guard AudioObjectGetPropertyData(device, &propertyAddress, 0, nil, &size, raw) == noErr else { return 0 }
     let list = UnsafeMutableAudioBufferListPointer(raw.assumingMemoryBound(to: AudioBufferList.self))
-    return list.first.map { Int($0.mNumberChannels) } ?? 0 // stream 0, the one the taps read
+    return list.first.map { Int($0.mNumberChannels) } ?? 0  // stream 0, the one the taps read
 }
 
 func tapFormat(_ tap: AudioObjectID) -> AudioStreamBasicDescription? {
@@ -162,20 +168,21 @@ func runEmitter() -> Never {
     let state = EmitterState()
     var procID: AudioDeviceIOProcID?
     let queue = DispatchQueue(label: "nulltest.emit", qos: .userInteractive)
-    check(AudioDeviceCreateIOProcIDWithBlock(&procID, device, queue) { _, _, _, output, _ in
-        var channel = 0
-        for buffer in UnsafeMutableAudioBufferListPointer(output) {
-            guard let data = buffer.mData?.assumingMemoryBound(to: Float.self) else { continue }
-            let channels = Int(buffer.mNumberChannels)
-            let frames = Int(buffer.mDataByteSize) / (MemoryLayout<Float>.size * max(1, channels))
-            for frame in 0..<frames {
-                for c in 0..<channels where channel + c < state.generators.count {
-                    data[frame * channels + c] = state.generators[channel + c].next()
+    check(
+        AudioDeviceCreateIOProcIDWithBlock(&procID, device, queue) { _, _, _, output, _ in
+            var channel = 0
+            for buffer in UnsafeMutableAudioBufferListPointer(output) {
+                guard let data = buffer.mData?.assumingMemoryBound(to: Float.self) else { continue }
+                let channels = Int(buffer.mNumberChannels)
+                let frames = Int(buffer.mDataByteSize) / (MemoryLayout<Float>.size * max(1, channels))
+                for frame in 0..<frames {
+                    for c in 0..<channels where channel + c < state.generators.count {
+                        data[frame * channels + c] = state.generators[channel + c].next()
+                    }
                 }
+                channel += channels
             }
-            channel += channels
-        }
-    }, "crear el IOProc de la app de prueba")
+        }, "crear el IOProc de la app de prueba")
     check(AudioDeviceStart(device, procID), "arrancar la app de prueba")
     signal(SIGTERM) { _ in exit(0) }
     while true { sleep(60) }
@@ -184,8 +191,8 @@ func runEmitter() -> Never {
 // MARK: - Capture (two taps, one aggregate, one IOProc)
 
 final class Capture: @unchecked Sendable {
-    let channels: [Int]          // per tap
-    let interleaved: [Bool]      // per tap
+    let channels: [Int]  // per tap
+    let interleaved: [Bool]  // per tap
     let capacity: Int
     let warmupFrames: Int
     var storage: [[UnsafeMutablePointer<Float>]]
@@ -213,7 +220,7 @@ final class Capture: @unchecked Sendable {
         let list = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
         let needed = buffersPerTap.reduce(0, +)
         guard list.count >= needed else { return }
-        var index = list.count - needed // taps come after any device input streams
+        var index = list.count - needed  // taps come after any device input streams
         guard list[index].mData != nil else { return }
         let frames = Int(list[index].mDataByteSize) / (MemoryLayout<Float>.size * Int(max(1, list[index].mNumberChannels)))
         let skip = max(0, min(frames, warmupFrames - seen))
@@ -264,7 +271,8 @@ if arguments.first == "--selftest" {
 let options = parseOptions(arguments)
 
 guard let device = defaultOutputDevice(), let deviceUID = getString(device, kAudioDevicePropertyDeviceUID) else {
-    print("No hay salida predeterminada."); exit(4)
+    print("No hay salida predeterminada.")
+    exit(4)
 }
 let deviceName = getString(device, kAudioObjectPropertyName) ?? deviceUID
 let rateBefore = nominalRate(device) ?? 0
@@ -280,20 +288,27 @@ AudioObjectAddPropertyListenerBlock(device, &rateAddress, rateQueue, rateListene
 let emitter = Process()
 emitter.executableURL = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
 emitter.arguments = ["emit"]
-do { try emitter.run() } catch { print("No se pudo lanzar la app de prueba: \(error)"); exit(4) }
+do { try emitter.run() } catch {
+    print("No se pudo lanzar la app de prueba: \(error)")
+    exit(4)
+}
 defer { if emitter.isRunning { emitter.terminate() } }
 let emitterPID = emitter.processIdentifier
 
 func finish(_ code: Int32) -> Never {
-    if emitter.isRunning { emitter.terminate(); emitter.waitUntilExit() }
+    if emitter.isRunning {
+        emitter.terminate()
+        emitter.waitUntilExit()
+    }
     exit(code)
 }
 
-print("""
-La app de prueba suena (ruido a −12 dBFS, PID \(emitterPID)). Baja el volumen del Mac si molesta.
-En SonicRouter, pon «SonicRouterNullTest» al 99 % (o al valor que quieras medir).
-Silencia las demás apps. Esperando hasta \(Int(options.waitSeconds)) s…
-""")
+print(
+    """
+    La app de prueba suena (ruido a −12 dBFS, PID \(emitterPID)). Baja el volumen del Mac si molesta.
+    En SonicRouter, pon «SonicRouterNullTest» al 99 % (o al valor que quieras medir).
+    Silencia las demás apps. Esperando hasta \(Int(options.waitSeconds)) s…
+    """)
 
 var emitterObject: AudioObjectID?
 var routerObject: AudioObjectID?
@@ -313,7 +328,8 @@ Thread.sleep(forTimeInterval: 1)
 
 let (referenceTap, referenceUID) = makeTap(
     CATapDescription(processes: [emitterObject], deviceUID: deviceUID, stream: 0), name: "NullTest reference")
-let capturedDescription = options.captureSonicRouterOnly
+let capturedDescription =
+    options.captureSonicRouterOnly
     ? CATapDescription(processes: [routerObject], deviceUID: deviceUID, stream: 0)
     : CATapDescription(excludingProcesses: [emitterObject], deviceUID: deviceUID, stream: 0)
 let (capturedTap, capturedUID) = makeTap(capturedDescription, name: "NullTest re-emission")
@@ -321,8 +337,10 @@ let (capturedTap, capturedUID) = makeTap(capturedDescription, name: "NullTest re
 let formats = [tapFormat(referenceTap), tapFormat(capturedTap)]
 for (name, format) in zip(["referencia", "re-emisión"], formats) {
     guard let format, format.mFormatID == kAudioFormatLinearPCM,
-          format.mFormatFlags & kAudioFormatFlagIsFloat != 0, format.mBitsPerChannel == 32 else {
-        print("Formato de tap de \(name) no admitido: \(String(describing: format))"); finish(6)
+        format.mFormatFlags & kAudioFormatFlagIsFloat != 0, format.mBitsPerChannel == 32
+    else {
+        print("Formato de tap de \(name) no admitido: \(String(describing: format))")
+        finish(6)
     }
 }
 let tapChannels = formats.map { Int($0!.mChannelsPerFrame) }
@@ -339,7 +357,7 @@ let aggregateDescription: [String: Any] = [
     kAudioAggregateDeviceIsStackedKey: 0,
     kAudioAggregateDeviceTapAutoStartKey: 1,
     kAudioAggregateDeviceSubDeviceListKey: [[kAudioSubDeviceUIDKey: deviceUID]],
-    kAudioAggregateDeviceTapListKey: [[kAudioSubTapUIDKey: referenceUID], [kAudioSubTapUIDKey: capturedUID]]
+    kAudioAggregateDeviceTapListKey: [[kAudioSubTapUIDKey: referenceUID], [kAudioSubTapUIDKey: capturedUID]],
 ]
 var aggregate = AudioObjectID(kAudioObjectUnknown)
 check(AudioHardwareCreateAggregateDevice(aggregateDescription as CFDictionary, &aggregate), "crear el agregado")
@@ -351,9 +369,10 @@ let capture = Capture(
     warmupFrames: Int(captureRate * 0.5)
 )
 var captureProc: AudioDeviceIOProcID?
-check(AudioDeviceCreateIOProcIDWithBlock(&captureProc, aggregate, DispatchQueue(label: "nulltest.capture")) { _, input, _, _, _ in
-    capture.process(input)
-}, "crear el IOProc de captura")
+check(
+    AudioDeviceCreateIOProcIDWithBlock(&captureProc, aggregate, DispatchQueue(label: "nulltest.capture")) { _, input, _, _, _ in
+        capture.process(input)
+    }, "crear el IOProc de captura")
 check(AudioDeviceStart(aggregate, captureProc), "arrancar la captura")
 let captureDeadline = Date().addingTimeInterval(options.seconds + 3)
 while capture.written < capture.capacity, Date() < captureDeadline { Thread.sleep(forTimeInterval: 0.1) }
@@ -379,15 +398,18 @@ let report = NullTestAnalysis.analyze(
     gainHint: options.gainHint
 )
 print("")
-print(String(format: "Capturado: %d tramas (%.2f s). Referencia: %.1f dBFS RMS.",
-             capture.written, Double(capture.written) / captureRate, report.referenceRMSDBFS))
+print(
+    String(
+        format: "Capturado: %d tramas (%.2f s). Referencia: %.1f dBFS RMS.",
+        capture.written, Double(capture.written) / captureRate, report.referenceRMSDBFS))
 for channel in report.channels {
-    print(String(
-        format: "Canal %d ← %d  retardo %d  ganancia %.9g  exactas %d/%d  residuo pico %.1f dBFS, RMS %.1f dBFS  clics %d%@",
-        channel.channel + 1, channel.sourceChannel + 1, channel.lag, Double(channel.gain),
-        channel.exactFrames, channel.comparedFrames, channel.peakResidualDBFS, channel.rmsResidualDBFS,
-        channel.glitchFrames, channel.firstGlitchFrame.map { " (primero en \($0))" } ?? ""
-    ))
+    print(
+        String(
+            format: "Canal %d ← %d  retardo %d  ganancia %.9g  exactas %d/%d  residuo pico %.1f dBFS, RMS %.1f dBFS  clics %d%@",
+            channel.channel + 1, channel.sourceChannel + 1, channel.lag, Double(channel.gain),
+            channel.exactFrames, channel.comparedFrames, channel.peakResidualDBFS, channel.rmsResidualDBFS,
+            channel.glitchFrames, channel.firstGlitchFrame.map { " (primero en \($0))" } ?? ""
+        ))
 }
 var problems = report.problems
 print("Frecuencia nominal: antes \(rateBefore), durante \(rateDuring), después \(rateAfter); cambios: \(totalRateChanges).")
@@ -400,5 +422,5 @@ if problems.isEmpty && report.passed {
     finish(0)
 }
 print("RESULTADO: FALLA")
-problems.forEach { print("  - \($0)") }
+for problem in problems { print("  - \(problem)") }
 finish(1)

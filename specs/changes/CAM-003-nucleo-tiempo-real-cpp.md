@@ -70,7 +70,7 @@ se retiran: los sustituye `RealtimeRenderer`.
 | T3 | Motor de volumen con IOProc C | Hecho |
 | T4 | Pruebas de equivalencia bit a bit (A01, A02) y de mutación | Hecho |
 | T5 | Recorrido con audio real: volumen, EQ, ruta, dos salidas, quitar y poner controles | Pendiente: necesita al titular |
-| T6 | Medición en Mac real del tiempo del callback y sobrecargas (REN-01-R04) | Pendiente |
+| T6 | Medición en Mac real del tiempo del callback y sobrecargas (REN-01-R04) | Instrumentación hecha 2026-11-19 (contadores en `sr_renderer_ioproc`, `RenderStatsMonitor`, `Scripts/render-stats.sh`); la medición necesita al titular |
 
 ## Evidencia
 

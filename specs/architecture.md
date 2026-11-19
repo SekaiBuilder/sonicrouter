@@ -77,6 +77,6 @@ e importación de perfiles en JSON por paneles del sistema.
 |---|---|
 | Ninguna prueba cubre MOD-02 a MOD-07 (unas 6.300 líneas) | `Tests/` solo importa `SonicRouterCore` |
 | El estado de apps concentra muchas responsabilidades en 1.481 líneas | `ApplicationAudioStore.swift` |
-| El README dice «un par de milisegundos» de latencia; el código anota ~50 ms medidos | `AudioProcessTap.swift:850` |
-| Sin CI | no existe `.github/` |
+| ~~El README dice «un par de milisegundos» de latencia~~ Corregido el 2026-11-19 (CAM-001 T6): ahora cita los ~50 ms anotados | `AudioProcessTap.swift:801` |
+| ~~Sin CI~~ CI escrita el 2026-11-19 (`Scripts/ci.sh`, `.github/workflows/ci.yml`) | [testing.md](testing.md) |
 | La release publicada (v1.2) va muy por detrás del código (1.5) | `gh release list` |

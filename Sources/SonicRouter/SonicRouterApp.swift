@@ -1,4 +1,5 @@
 import AppKit
+import SonicRouterCore
 import SwiftUI
 
 /// Keeps SonicRouter alive when the main window closes: the app leaves the
@@ -57,6 +58,12 @@ struct SonicRouterApp: App {
     @StateObject private var audioStore = AudioDeviceStore()
     @StateObject private var appStore = ApplicationAudioStore()
     @AppStorage(StartupPreferences.startInMenuBarKey) private var startInMenuBar = false
+
+    init() {
+        // Before any store reads its preferences (plan A8): carry them over
+        // from the old domain when the bundle ID changes. No-op otherwise.
+        PreferenceMigration.migrate(currentDomain: Bundle.main.bundleIdentifier)
+    }
 
     var body: some Scene {
         Window("SonicRouter", id: "main") {

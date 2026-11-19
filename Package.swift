@@ -51,6 +51,12 @@ let package = Package(
         .executableTarget(
             name: "SonicRouterNullTest",
             path: "Tests/SonicRouterNullTest"
+        ),
+        // Read-only checks of SonicRouter's Core Audio objects (CAM-002-A17):
+        // `swift run SonicRouterAudioTools orphans`.
+        .executableTarget(
+            name: "SonicRouterAudioTools",
+            path: "Tests/SonicRouterAudioTools"
         )
     ],
     cxxLanguageStandard: .cxx20

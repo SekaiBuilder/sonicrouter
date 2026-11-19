@@ -9,6 +9,11 @@ CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 ICON_FILE="$ROOT_DIR/Assets/AppIcon.icns"
+# Overridable by the release scripts (Scripts/release-*.sh); defaults are the
+# development values.
+BUNDLE_ID="${SONICROUTER_BUNDLE_ID:-local.sonicrouter.app}"
+MARKETING_VERSION="${SONICROUTER_VERSION:-1.5}"
+BUILD_NUMBER="${SONICROUTER_BUILD:-7}"
 
 cd "$ROOT_DIR"
 UNIVERSAL_BUILD="${SONICROUTER_UNIVERSAL:-1}"
@@ -48,6 +53,7 @@ else
 fi
 cp "$ICON_FILE" "$RESOURCES_DIR/AppIcon.icns"
 cp "$ROOT_DIR/Config/PrivacyInfo.xcprivacy" "$RESOURCES_DIR/PrivacyInfo.xcprivacy"
+cp "$ROOT_DIR/Config/container-migration.plist" "$RESOURCES_DIR/container-migration.plist"
 
 cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -65,7 +71,7 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
   <key>CFBundleExecutable</key>
   <string>$APP_NAME</string>
   <key>CFBundleIdentifier</key>
-  <string>local.sonicrouter.app</string>
+  <string>$BUNDLE_ID</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
@@ -79,9 +85,9 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>1.5</string>
+  <string>$MARKETING_VERSION</string>
   <key>CFBundleVersion</key>
-  <string>7</string>
+  <string>$BUILD_NUMBER</string>
   <key>LSApplicationCategoryType</key>
   <string>public.app-category.utilities</string>
   <key>LSMinimumSystemVersion</key>
@@ -114,7 +120,16 @@ if command -v codesign >/dev/null 2>&1; then
   if [[ "$SIGN_IDENTITY" == "-" ]]; then
     codesign --force --sign - "$APP_DIR" >/dev/null
   else
-    codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP_DIR" >/dev/null
+    # Store builds embed their provisioning profile and sign with entitlements.
+    if [[ -n "${SONICROUTER_PROVISIONING_PROFILE:-}" ]]; then
+      cp "$SONICROUTER_PROVISIONING_PROFILE" "$CONTENTS_DIR/embedded.provisionprofile"
+    fi
+    ENTITLEMENT_ARGS=()
+    if [[ -n "${SONICROUTER_ENTITLEMENTS:-}" ]]; then
+      ENTITLEMENT_ARGS=(--entitlements "$SONICROUTER_ENTITLEMENTS")
+    fi
+    codesign --force --options runtime --timestamp ${ENTITLEMENT_ARGS[@]+"${ENTITLEMENT_ARGS[@]}"} \
+      --sign "$SIGN_IDENTITY" "$APP_DIR" >/dev/null
   fi
 fi
 
